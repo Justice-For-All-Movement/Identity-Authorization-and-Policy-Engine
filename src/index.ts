@@ -5,13 +5,23 @@ export const ACTIONS=['read','investigate','process','draft','manage_agents','co
 export type Action=(typeof ACTIONS)[number];
 const roleActions:Record<string,readonly Action[]>={viewer:['read'],researcher:['read','investigate','process','draft'],operator:['read','investigate','process','draft','manage_agents'],owner:ACTIONS};
 export interface Identity extends Scope {actor:Actor;tokenHash:string;disabled:boolean;epoch:number;}
+function object(value:unknown):value is Record<string,unknown>{return value!==null&&typeof value==='object'&&!Array.isArray(value);}
+function identifier(value:unknown):value is string{return typeof value==='string'&&value.trim().length>0&&value.length<=128;}
+function scoped(value:unknown):boolean{return object(value)&&identifier(value.tenantId)&&identifier(value.projectId);}
+function scopedActor(value:unknown):boolean{
+ if(!scoped(value)||!object(value)||!object(value.actor))return false;
+ const actor=value.actor;
+ return identifier(actor.id)&&['human','agent','service'].includes(actor.kind as string)&&Array.isArray(actor.roles)&&actor.roles.length<=32&&actor.roles.every(identifier);
+}
 export function tokenHash(token:string):string{return createHash('sha256').update(token).digest('hex');}
 export function authenticate(token:string,identities:readonly Identity[]):Identity{
- invariant(token.length>=32&&token.length<=512,'unauthenticated','Valid credentials required');const hash=Buffer.from(tokenHash(token),'hex');
- const id=identities.find(i=>!i.disabled && /^[a-f0-9]{64}$/.test(i.tokenHash) && timingSafeEqual(hash,Buffer.from(i.tokenHash,'hex')));
- invariant(id,'unauthenticated','Valid credentials required');return structuredClone(id);
+ invariant(typeof token==='string'&&token.length>=32&&token.length<=512&&Array.isArray(identities),'unauthenticated','Valid credentials required');const hash=Buffer.from(tokenHash(token),'hex');
+ const matches=identities.filter(i=>object(i)&&i.disabled===false&&typeof i.tokenHash==='string'&&/^[a-f0-9]{64}$/.test(i.tokenHash)&&timingSafeEqual(hash,Buffer.from(i.tokenHash,'hex')));
+ const id=matches[0];
+ invariant(matches.length===1&&id&&scopedActor(id)&&Number.isSafeInteger(id.epoch)&&id.epoch>=0,'unauthenticated','Valid credentials required');return structuredClone(id);
 }
 export function authorize(ctx:Context, action:Action, resource:Scope=ctx):void {
+ invariant(scopedActor(ctx),'invalid_identity','A valid scoped actor is required');invariant(scoped(resource),'invalid_scope','A valid resource scope is required');
  requireScope(ctx,resource);nonempty(ctx.purpose,'purpose',200);
  invariant(ctx.actor.roles.some(r=>Object.hasOwn(roleActions,r)&&roleActions[r]!.includes(action)),'forbidden','This action requires an authorized role');
  if(action==='release'||action==='admin') invariant(ctx.actor.kind==='human','human_authority_required','A human identity is required');
