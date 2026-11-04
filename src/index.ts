@@ -36,7 +36,9 @@ function validateCapability(value:unknown,code='invalid_capability'):asserts val
  invariant((ACTIONS as readonly unknown[]).includes(value.action)&&identifier(value.purpose),code,'Capability action or purpose is invalid');
  invariant(Array.isArray(value.resourceIds)&&value.resourceIds.length>0&&value.resourceIds.length<=256&&value.resourceIds.every(identifier)&&new Set(value.resourceIds).size===value.resourceIds.length,code,'Capability resources are invalid');
  invariant(positiveInteger(value.policyRevision)&&nonnegativeInteger(value.actorEpoch),code,'Capability revisions are invalid');
- const notBefore=validTime(value.notBefore),expiresAt=validTime(value.expiresAt);
+ const notBeforeValue=value.notBefore,expiresAtValue=value.expiresAt;
+ invariant(identifier(notBeforeValue)&&identifier(expiresAtValue),code,'Capability validity timestamps are invalid');
+ const notBefore=validTime(notBeforeValue),expiresAt=validTime(expiresAtValue);
  invariant(expiresAt>notBefore&&expiresAt-notBefore<=3600000,code,'Capability duration is at most 1 hour');
 }
 function validateExpected(value:unknown):asserts value is {action:Action;resourceId:string;policyRevision:number;actorEpoch:number;revokedIds:readonly string[]}{
