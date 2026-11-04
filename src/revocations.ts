@@ -1,4 +1,7 @@
-import { verifyStoredCapability } from "./stored-capability.ts";
+import {
+  validateRevocationState,
+  verifyStoredCapability,
+} from "./stored-capability.ts";
 import { scoped } from "@accountability/evidence/database";
 import type { Database, UnitOfWork } from "@accountability/evidence/database";
 import { ACTIONS, authorize } from "./index.ts";
@@ -76,7 +79,14 @@ export class RevocationRegistry {
   async #get(tx: UnitOfWork): Promise<RevocationSnapshot> {
     const r = await tx.get<RevocationState>(KIND, KEY);
     invariant(r, "not_initialized", "Revocations unavailable");
-    return { revision: r.revision, state: r.value };
+    invariant(
+      Number.isSafeInteger(r.revision) && r.revision > 0,
+      "invalid_revocation_state",
+      "Positive revocation record revision required",
+    );
+    const state = structuredClone(r.value);
+    validateRevocationState(state);
+    return { revision: r.revision, state };
   }
   async initialize(
     context: Context,
