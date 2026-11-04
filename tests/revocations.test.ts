@@ -386,6 +386,94 @@ test("clock is sampled after policy loading, and captured key/context survive ca
   assert.deepEqual(await op, profile);
 });
 
+test("capability verification rejects a malformed durable record revision", async (t) => {
+  const f = await fixture(t);
+  const db: Database = {
+    transaction: (fn) =>
+      f.db.transaction((q) =>
+        fn({
+          query: async <T>(sql: string, v?: unknown[]) => {
+            const result = await q.query<T>(sql, v);
+            if (
+              sql.includes("SELECT") &&
+              sql.includes("FROM public.evidence_record")
+            ) {
+              return {
+                rows: result.rows.map(
+                  (row) => ({ ...(row as object), revision: 0 }) as T,
+                ),
+              };
+            }
+            return result;
+          },
+        }),
+      ),
+    close: async () => {},
+  };
+  await assert.rejects(
+    new RevocationRegistry(db, f.policy, () => c.now).verify(
+      viewer,
+      f.token,
+      expected,
+      f.key,
+    ),
+    { code: "invalid_revocation_state" },
+  );
+});
+
+test("corrupt durable revocation state fails closed across read, mutation and verification", async (t) => {
+  const f = await fixture(t),
+    id = digest({ aggregate: "identity-revocations" });
+  const malformed = [
+    { policyRevision: 0, actorEpochs: [], revokedIds: [] },
+    { policyRevision: 1, actorEpochs: "invalid", revokedIds: [] },
+    {
+      policyRevision: 1,
+      actorEpochs: [
+        { actorId: "reader", epoch: 1 },
+        { actorId: "reader", epoch: 2 },
+      ],
+      revokedIds: [],
+    },
+    {
+      policyRevision: 1,
+      actorEpochs: [],
+      revokedIds: ["grant", "grant"],
+    },
+    {
+      policyRevision: 1,
+      actorEpochs: [],
+      revokedIds: [],
+      unexpected: true,
+    },
+  ];
+  for (const [index, state] of malformed.entries()) {
+    const before = await f.registry.read(c);
+    const saved = await scoped(f.db, c, (tx) =>
+      tx.put("identity-revocations", id, before.revision, state),
+    );
+    await assert.rejects(f.registry.read(c), {
+      code: "invalid_revocation_state",
+    });
+    await assert.rejects(
+      f.registry.apply(
+        c,
+        saved.revision,
+        { type: "advance-policy" },
+        `corrupt-${index}`,
+      ),
+      { code: "invalid_revocation_state" },
+    );
+    await assert.rejects(
+      f.registry.verify(viewer, f.token, expected, f.key),
+      { code: "invalid_revocation_state" },
+    );
+    await scoped(f.db, c, (tx) =>
+      tx.put("identity-revocations", id, saved.revision, before.state),
+    );
+  }
+});
+
 test("exhausted epochs and bounded registries reject rather than wrap or discard old revocations", async (t) => {
   const f = await fixture(t),
     id = digest({ aggregate: "identity-revocations" });

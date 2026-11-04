@@ -1,9 +1,77 @@
 import type { UnitOfWork } from "@accountability/evidence/database";
 import { verifyCapability } from "./index.ts";
 import type { Action, Capability } from "./index.ts";
-import { digest, invariant, nonempty, validTime } from "./contracts.ts";
+import { canonical, digest, invariant, nonempty, validTime } from "./contracts.ts";
 import type { Context } from "./contracts.ts";
 import type { RevocationState } from "./revocations.ts";
+function plainRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype
+  );
+}
+function boundedId(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= 128;
+}
+export function validateRevocationState(
+  value: unknown,
+): asserts value is RevocationState {
+  invariant(
+    plainRecord(value) &&
+      Object.keys(value).length === 3 &&
+      ["policyRevision", "actorEpochs", "revokedIds"].every((key) =>
+        Object.hasOwn(value, key),
+      ),
+    "invalid_revocation_state",
+    "Exact revocation state required",
+  );
+  invariant(
+    Number.isSafeInteger(value.policyRevision) &&
+      (value.policyRevision as number) > 0,
+    "invalid_revocation_state",
+    "Positive policy revision required",
+  );
+  invariant(
+    Array.isArray(value.actorEpochs) && value.actorEpochs.length <= 1024,
+    "invalid_revocation_state",
+    "Bounded actor epochs required",
+  );
+  const actorIds: string[] = [];
+  for (const entry of value.actorEpochs) {
+    invariant(
+      plainRecord(entry) &&
+        Object.keys(entry).length === 2 &&
+        Object.hasOwn(entry, "actorId") &&
+        Object.hasOwn(entry, "epoch") &&
+        boundedId(entry.actorId) &&
+        Number.isSafeInteger(entry.epoch) &&
+        (entry.epoch as number) > 0,
+      "invalid_revocation_state",
+      "Valid actor epoch required",
+    );
+    actorIds.push(entry.actorId);
+  }
+  invariant(
+    new Set(actorIds).size === actorIds.length,
+    "invalid_revocation_state",
+    "Distinct actor epochs required",
+  );
+  invariant(
+    Array.isArray(value.revokedIds) &&
+      value.revokedIds.length <= 4096 &&
+      value.revokedIds.every(boundedId) &&
+      new Set(value.revokedIds).size === value.revokedIds.length,
+    "invalid_revocation_state",
+    "Bounded distinct capability revocations required",
+  );
+  invariant(
+    Buffer.byteLength(canonical(value)) <= 1024 * 1024,
+    "invalid_revocation_state",
+    "Revocation state byte budget exceeded",
+  );
+}
 // Internal only: caller owns the project lock, principal admission and copied key lifetime.
 export async function verifyStoredCapability(
   tx: UnitOfWork,
@@ -19,6 +87,12 @@ export async function verifyStoredCapability(
     digest({ aggregate: "identity-revocations" }),
   );
   invariant(row, "not_initialized", "Revocations unavailable");
+  invariant(
+    Number.isSafeInteger(row.revision) && row.revision > 0,
+    "invalid_revocation_state",
+    "Positive revocation record revision required",
+  );
+  validateRevocationState(row.value);
   const state = row.value;
   const now = clock();
   invariant(
