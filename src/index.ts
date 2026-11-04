@@ -7,6 +7,8 @@ const roleActions:Record<string,readonly Action[]>={viewer:['read'],researcher:[
 export interface Identity extends Scope {actor:Actor;tokenHash:string;disabled:boolean;epoch:number;}
 function object(value:unknown):value is Record<string,unknown>{return value!==null&&typeof value==='object'&&!Array.isArray(value);}
 function identifier(value:unknown):value is string{return typeof value==='string'&&value.trim().length>0&&value.length<=128;}
+function positiveInteger(value:unknown):value is number{return Number.isSafeInteger(value)&&(value as number)>0;}
+function nonnegativeInteger(value:unknown):value is number{return Number.isSafeInteger(value)&&(value as number)>=0;}
 function scoped(value:unknown):boolean{return object(value)&&identifier(value.tenantId)&&identifier(value.projectId);}
 function scopedActor(value:unknown):boolean{
  if(!scoped(value)||!object(value)||!object(value.actor))return false;
@@ -27,18 +29,37 @@ export function authorize(ctx:Context, action:Action, resource:Scope=ctx):void {
  if(action==='release'||action==='admin') invariant(ctx.actor.kind==='human','human_authority_required','A human identity is required');
 }
 export type Capability = Scope & {id:string;actorId:string;action:Action;purpose:string;resourceIds:string[];policyRevision:number;actorEpoch:number;notBefore:string;expiresAt:string;};
+const CAPABILITY_FIELDS=['tenantId','projectId','id','actorId','action','purpose','resourceIds','policyRevision','actorEpoch','notBefore','expiresAt'] as const;
+function validateCapability(value:unknown,code='invalid_capability'):asserts value is Capability{
+ invariant(object(value)&&Object.keys(value).every(key=>(CAPABILITY_FIELDS as readonly string[]).includes(key))&&Object.keys(value).length===CAPABILITY_FIELDS.length,code,'Capability schema is invalid');
+ invariant(identifier(value.tenantId)&&identifier(value.projectId)&&identifier(value.id)&&identifier(value.actorId),code,'Capability identifiers are invalid');
+ invariant((ACTIONS as readonly unknown[]).includes(value.action)&&identifier(value.purpose),code,'Capability action or purpose is invalid');
+ invariant(Array.isArray(value.resourceIds)&&value.resourceIds.length>0&&value.resourceIds.length<=256&&value.resourceIds.every(identifier)&&new Set(value.resourceIds).size===value.resourceIds.length,code,'Capability resources are invalid');
+ invariant(positiveInteger(value.policyRevision)&&nonnegativeInteger(value.actorEpoch),code,'Capability revisions are invalid');
+ const notBefore=validTime(value.notBefore),expiresAt=validTime(value.expiresAt);
+ invariant(expiresAt>notBefore&&expiresAt-notBefore<=3600000,code,'Capability duration is at most 1 hour');
+}
+function validateExpected(value:unknown):asserts value is {action:Action;resourceId:string;policyRevision:number;actorEpoch:number;revokedIds:readonly string[]}{
+ invariant(object(value)&&(ACTIONS as readonly unknown[]).includes(value.action)&&identifier(value.resourceId),'invalid_capability','Expected capability scope is invalid');
+ invariant(positiveInteger(value.policyRevision)&&nonnegativeInteger(value.actorEpoch),'invalid_capability','Expected capability revisions are invalid');
+ invariant(Array.isArray(value.revokedIds)&&value.revokedIds.length<=10000&&value.revokedIds.every(identifier),'invalid_capability','Capability revocations are invalid');
+}
+function validateKey(secret:unknown):asserts secret is Uint8Array{
+ invariant(secret instanceof Uint8Array&&secret.length>=32,'invalid_key','Signing key must be at least 32 bytes');
+}
 export function issueCapability(ctx:Context,cap:Capability,secret:Uint8Array):string{
- authorize(ctx,'admin',cap);invariant(secret.length>=32,'invalid_key','Signing key must be at least32bytes');
- invariant(validTime(cap.expiresAt)>validTime(cap.notBefore)&&validTime(cap.expiresAt)-validTime(cap.notBefore)<=3600000,'invalid_expiry','Capability duration is at most1hour');
+ validateCapability(cap,'invalid_capability');validateKey(secret);authorize(ctx,'admin',cap);
  const payload=Buffer.from(canonical(cap)).toString('base64url');return payload+'.'+createHmac('sha256',secret).update(payload).digest('base64url');
 }
 export function verifyCapability(token:string,ctx:Context,expected:{action:Action;resourceId:string;policyRevision:number;actorEpoch:number;revokedIds:readonly string[]},secret:Uint8Array):Capability{
- invariant(secret.length>=32&&token.length<10000,'invalid_capability','Invalid capability');const [payload,signature,...extra]=token.split('.');invariant(payload&&signature&&extra.length===0,'invalid_capability','Malformed capability');
+ validateKey(secret);validateExpected(expected);invariant(typeof token==='string'&&token.length>0&&token.length<10000,'invalid_capability','Invalid capability');const [payload,signature,...extra]=token.split('.');invariant(payload&&signature&&extra.length===0&&/^[A-Za-z0-9_-]{43}$/.test(signature),'invalid_capability','Malformed capability');
  const got=Buffer.from(signature,'base64url');const want=createHmac('sha256',secret).update(payload).digest();invariant(got.length===want.length&&timingSafeEqual(got,want),'invalid_capability','Signature mismatch');
- let cap:Capability;try{cap=JSON.parse(Buffer.from(payload,'base64url').toString()) as Capability;}catch{throw new Error('Invalid capability encoding');}
+ let parsed:unknown;try{parsed=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));}catch{invariant(false,'invalid_capability','Invalid capability encoding');}
+ validateCapability(parsed);const cap=parsed;invariant(Buffer.from(canonical(cap)).toString('base64url')===payload,'invalid_capability','Capability encoding is not canonical');
  requireScope(ctx,cap);const now=validTime(ctx.now);
  invariant(cap.actorId===ctx.actor.id&&cap.action===expected.action&&cap.purpose===ctx.purpose,'invalid_capability','Capability audience or purpose mismatch');
  invariant(cap.policyRevision===expected.policyRevision&&cap.actorEpoch===expected.actorEpoch&&!expected.revokedIds.includes(cap.id),'revoked_capability','Capability revoked or stale');
  invariant(now>=validTime(cap.notBefore)&&now<validTime(cap.expiresAt),'expired_capability','Capability outside validity window');
- invariant(Array.isArray(cap.resourceIds)&&cap.resourceIds.includes(expected.resourceId),'invalid_capability','Resource outside capability scope');return cap;
+ invariant(cap.resourceIds.includes(expected.resourceId),'invalid_capability','Resource outside capability scope');return structuredClone(cap);
 }
+
