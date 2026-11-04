@@ -4,7 +4,7 @@
   "roadmapVersion": 1,
   "planVerified": true,
   "plannedPrCount": 8,
-  "observedAt": "2026-11-04T22:25:00Z",
+  "observedAt": "2026-11-04T22:31:00Z",
   "units": [
     {
       "id": "IAP-001",
@@ -80,9 +80,11 @@
         "Revocation and epoch invalidation"
       ],
       "acceptanceCriteria": "Verify normal behavior and rejection paths with source-bound automated evidence. Live acceptance is separate.",
-      "implementationStatus": "in_review",
+      "implementationStatus": "merged_exact_head_and_main_checks_passed",
       "acceptanceEvidence": [
-        "PR #18 validates exact bounded durable revocation state across read, mutation and verification; hosted exact-head CI is pending."
+        "PR #18 exact head 8e4419ee404ca2b266d558fe14cdd9a94ec02e93 passed Engine checks run 41925390602, including the full check and PostgreSQL contention jobs.",
+        "PR #18 squash-merged as fc184c08f87aa61e3b31f712d00f435df91d1592.",
+        "Merged-main Engine checks run 41925721550 passed."
       ]
     },
     {
@@ -233,13 +235,13 @@
       "id": 5162587078,
       "number": 18,
       "title": "IAP-003: validate durable revocation state",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/neophilism/Identity-Authorization-and-Policy-Engine/pull/18",
       "createdAt": "2026-11-04T22:23:33Z",
-      "updatedAt": "2026-11-04T22:23:51Z",
-      "mergedAt": null,
-      "closedAt": null,
-      "draft": true
+      "updatedAt": "2026-11-04T22:29:40Z",
+      "mergedAt": "2026-11-04T22:29:29Z",
+      "closedAt": "2026-11-04T22:29:29Z",
+      "draft": false
     }
   ],
   "scopeNote": "PR1 contributes to IAP-001/002/003; PR2 and PR3 contribute to IAP-004. Live GitHub remains authority; implementation/test/CI/live evidence are separate."
