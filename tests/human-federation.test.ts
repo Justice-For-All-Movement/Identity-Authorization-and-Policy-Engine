@@ -90,10 +90,11 @@ test("unmapped stale expired future and wrong-audience claims fail closed", asyn
 });
 
 test("ambiguous disabled malformed and mutable mappings are rejected before use", async () => {
+  const first = policy.mappings[0]!;
   for (const mappings of [
     [...policy.mappings, ...policy.mappings],
-    [{ ...policy.mappings[0], issuer: "http://identity.example/" }],
-    [{ ...policy.mappings[0], extra: "claim" }],
+    [{ ...first, issuer: "http://identity.example/" }],
+    [{ ...first, extra: "claim" }],
   ])
     assert.throws(
       () =>
@@ -108,7 +109,7 @@ test("ambiguous disabled malformed and mutable mappings are rejected before use"
     { verify: async () => claims },
     {
       ...policy,
-      mappings: [{ ...policy.mappings[0], enabled: false }],
+      mappings: [{ ...first, enabled: false }],
     },
     () => now,
   );
@@ -122,7 +123,7 @@ test("ambiguous disabled malformed and mutable mappings are rejected before use"
     mutable,
     () => now,
   );
-  mutable.mappings[0].actorId = "changed";
+  mutable.mappings[0]!.actorId = "changed";
   assert.equal(
     (await provider.authenticate(metadata, new AbortController().signal))
       ?.actorId,
@@ -134,7 +135,7 @@ test("ambiguous disabled malformed and mutable mappings are rejected before use"
         { verify: async () => claims },
         {
           ...policy,
-          mappings: [{ ...policy.mappings[0], actorId: "a".repeat(129) }],
+          mappings: [{ ...first, actorId: "a".repeat(129) }],
         },
         () => now,
       ),
@@ -151,7 +152,7 @@ test("ambiguous disabled malformed and mutable mappings are rejected before use"
         {
           ...policy,
           mappings: [
-            { ...policy.mappings[0], actorId: () => "invalid" },
+            { ...first, actorId: () => "invalid" },
           ] as never,
         },
         () => now,
