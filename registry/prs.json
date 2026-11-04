@@ -4,7 +4,7 @@
   "roadmapVersion": 1,
   "planVerified": true,
   "plannedPrCount": 8,
-  "observedAt": "2026-11-04T22:23:33Z",
+  "observedAt": "2026-11-04T22:25:00Z",
   "units": [
     {
       "id": "IAP-001",
@@ -230,13 +230,13 @@
       "draft": false
     },
     {
-      "id": 5162479468,
+      "id": 5162587078,
       "number": 18,
       "title": "IAP-003: validate durable revocation state",
       "state": "open",
       "url": "https://github.com/neophilism/Identity-Authorization-and-Policy-Engine/pull/18",
       "createdAt": "2026-11-04T22:23:33Z",
-      "updatedAt": "2026-11-04T22:23:33Z",
+      "updatedAt": "2026-11-04T22:23:51Z",
       "mergedAt": null,
       "closedAt": null,
       "draft": true
