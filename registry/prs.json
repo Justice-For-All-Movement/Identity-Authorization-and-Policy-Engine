@@ -4,7 +4,7 @@
   "roadmapVersion": 1,
   "planVerified": true,
   "plannedPrCount": 8,
-  "observedAt": "2026-11-04T22:06:34Z",
+  "observedAt": "2026-11-04T22:10:51Z",
   "units": [
     {
       "id": "IAP-001",
@@ -55,7 +55,8 @@
       "acceptanceCriteria": "Verify normal behavior and rejection paths with source-bound automated evidence. Live acceptance is separate.",
       "implementationStatus": "in_review",
       "acceptanceEvidence": [
-        "Focused local Node capability tests passed 8/8 on behavior head 8a1d3a9bd88aebe42e07129e170f94c264687e44; exact-head hosted CI is pending."
+        "Focused local Node capability tests passed 8/8.",
+        "PR #16 exact head fe777dc0cd8880dded507515a7113eb36505654c passed Engine checks run 41922959478, including the full check and PostgreSQL contention jobs."
       ]
     },
     {
@@ -216,7 +217,7 @@
       "state": "open",
       "url": "https://github.com/neophilism/Identity-Authorization-and-Policy-Engine/pull/16",
       "createdAt": "2026-11-04T22:06:16Z",
-      "updatedAt": "2026-11-04T22:06:34Z",
+      "updatedAt": "2026-11-04T22:10:51Z",
       "mergedAt": null,
       "closedAt": null,
       "draft": true
