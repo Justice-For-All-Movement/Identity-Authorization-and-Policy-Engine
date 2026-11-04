@@ -4,14 +4,15 @@
   "roadmapVersion": 1,
   "planVerified": true,
   "plannedPrCount": 8,
-  "observedAt": "2026-11-04T21:57:00Z",
+  "observedAt": "2026-11-04T21:54:23Z",
   "units": [
     {
       "id": "IAP-001",
       "title": "Scoped actors and fail-closed role authorization",
       "origin": "original",
       "prs": [
-        14
+        14,
+        15
       ],
       "contributingPrs": [
         1
@@ -23,7 +24,7 @@
         "Scoped actors and fail-closed role authorization"
       ],
       "acceptanceCriteria": "Verify normal behavior and rejection paths with source-bound automated evidence. Live acceptance is separate.",
-      "implementationStatus": "merged_exact_head_and_main_checks_passed",
+      "implementationStatus": "implementation_merged_evidence_in_review",
       "acceptanceEvidence": [
         "PR #14 exact head a1a12d606c78c6188d47be93381181383075e661 passed Engine checks run 41369878445.",
         "PR #14 squash-merged as a19a3a02b73bb56ec3e38915c0e007365a13e456.",
@@ -187,6 +188,18 @@
       "mergedAt": "2026-11-04T21:51:29Z",
       "closedAt": "2026-11-04T21:51:30Z",
       "draft": false
+    },
+    {
+      "id": 5162228030,
+      "number": 15,
+      "title": "IAP-001: record verified merge evidence",
+      "state": "open",
+      "url": "https://github.com/neophilism/Identity-Authorization-and-Policy-Engine/pull/15",
+      "createdAt": "2026-11-04T21:54:23Z",
+      "updatedAt": "2026-11-04T21:54:23Z",
+      "mergedAt": null,
+      "closedAt": null,
+      "draft": true
     }
   ],
   "scopeNote": "PR1 contributes to IAP-001/002/003; PR2 and PR3 contribute to IAP-004. Live GitHub remains authority; implementation/test/CI/live evidence are separate."
