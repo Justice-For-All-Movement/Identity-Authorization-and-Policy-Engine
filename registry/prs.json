@@ -4,7 +4,7 @@
   "roadmapVersion": 1,
   "planVerified": true,
   "plannedPrCount": 8,
-  "observedAt": "2026-11-04T22:08:00Z",
+  "observedAt": "2026-11-04T22:10:51Z",
   "units": [
     {
       "id": "IAP-001",
@@ -38,7 +38,9 @@
       "id": "IAP-002",
       "title": "Signed purpose and resource capabilities",
       "origin": "original",
-      "prs": [],
+      "prs": [
+        16
+      ],
       "contributingPrs": [
         1
       ],
@@ -51,7 +53,11 @@
         "Signed purpose and resource capabilities"
       ],
       "acceptanceCriteria": "Verify normal behavior and rejection paths with source-bound automated evidence. Live acceptance is separate.",
-      "implementationStatus": "library_implemented_local_tests_passed"
+      "implementationStatus": "in_review",
+      "acceptanceEvidence": [
+        "Focused local Node capability tests passed 8/8.",
+        "PR #16 exact head fe777dc0cd8880dded507515a7113eb36505654c passed Engine checks run 41922959478, including the full check and PostgreSQL contention jobs."
+      ]
     },
     {
       "id": "IAP-003",
@@ -203,6 +209,18 @@
       "mergedAt": "2026-11-04T21:57:24Z",
       "closedAt": "2026-11-04T21:57:24Z",
       "draft": false
+    },
+    {
+      "id": 5162372731,
+      "number": 16,
+      "title": "IAP-002: harden signed capability boundaries",
+      "state": "open",
+      "url": "https://github.com/neophilism/Identity-Authorization-and-Policy-Engine/pull/16",
+      "createdAt": "2026-11-04T22:06:16Z",
+      "updatedAt": "2026-11-04T22:10:51Z",
+      "mergedAt": null,
+      "closedAt": null,
+      "draft": true
     }
   ],
   "scopeNote": "PR1 contributes to IAP-001/002/003; PR2 and PR3 contribute to IAP-004. Live GitHub remains authority; implementation/test/CI/live evidence are separate."

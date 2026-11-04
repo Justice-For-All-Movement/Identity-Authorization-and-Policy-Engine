@@ -240,15 +240,10 @@ test("verification uses post-lock live expiry and current role/scope, never a ca
       f.key,
     ),
   );
-  await assert.rejects(
-    f.registry.verify(
-      viewer,
-      issueCapability(
-        c,
-        { ...profile, extra: "untrusted" } as Capability,
-        f.key,
-      ),
-      expected,
+  assert.throws(() =>
+    issueCapability(
+      c,
+      { ...profile, extra: "untrusted" } as Capability,
       f.key,
     ),
   );

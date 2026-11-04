@@ -161,13 +161,8 @@ test("exact scope/kind/purpose/resource/profile and key bounds fail closed", asy
       new Uint8Array(31),
     ),
   );
-  await assert.rejects(
-    f.registry.verifyCapability(
-      actor("reader"),
-      issueCapability(c, { ...f.profile, extra: true } as Capability, f.key),
-      expected,
-      f.key,
-    ),
+  assert.throws(() =>
+    issueCapability(c, { ...f.profile, extra: true } as Capability, f.key),
   );
   await f.registry.verifyCapability(actor("reader"), f.token, expected, f.key);
 });

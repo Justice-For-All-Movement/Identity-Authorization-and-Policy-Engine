@@ -4,6 +4,8 @@ The engine exports country-neutral TypeScript authorization primitives. An authe
 
 Capabilities are HMAC-SHA256 signed and bind actor, tenant, project, purpose, resource IDs, policy revision, actor revocation epoch and a maximum one-hour validity period. Consumers must obtain current epochs, policies and revoked IDs from trusted storage at the action gateway. A valid signature alone is insufficient authority. Keep signing keys in deployment key custody.
 
+Capability issuance and verification validate the complete runtime schema before granting authority. Identifiers, actions, revisions, epochs and resource arrays are bounded; resource IDs must be nonempty and unique; verifier expectations and revocation lists are also bounded. Verification requires the signed payload to use the engine's canonical JSON encoding and returns detached data. Malformed signed data fails with the engine's authorization error contract instead of surfacing parser or type errors. These checks do not replace current policy, epoch and revocation reads at the consuming action gateway.
+
 The initial package is a library; it does not provide identity federation, credential issuance UI or a live service. Opt-in durable modules below use an Identity-owned operational database; hosting and federation remain pending. Shared contracts are exported at ./contracts and will be consumed through pinned engine packages. Runtime IDs are bounded opaque strings and references use immutable positive integer revisions.
 
 Tests use only fictional scopes and temporary signing keys. No real deployment identity or research is included.
@@ -49,3 +51,4 @@ Membership HTTP's twelve groups also pass installed compiled public exports, wit
 Optional resource restrictions now intersect exact resource member/purpose/action policies with current stored membership under one owning SQL lock. Existing role/capability/session/HTTP paths are unchanged; consuming action gateways must explicitly opt into resolveResource. This is partial IAP-006, not automatic compartment enforcement or external action fencing. See RESOURCE_POLICIES.md.
 
 Resource-policy session evidence separately covers actual resource-aware resolution after committed member/purpose/action restrictions and stored member disable/demotion, current-owner admission before cached policy acknowledgement, and policy CAS/lost COMMIT acknowledgement with retained history and fresh-pool replay. Seven new plus twelve prior PostgreSQL17 groups passed CI40900061441; see POSTGRES_TESTS.md and resource-policy-postgres-verification.json. This changes no runtime authority and does not qualify downstream external action fencing or production deployment.
+
