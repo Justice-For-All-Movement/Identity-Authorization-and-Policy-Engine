@@ -8,6 +8,8 @@ The initial package is a library; it does not provide identity federation, crede
 
 Tests use only fictional scopes and temporary signing keys. No real deployment identity or research is included.
 
+The public role authorizer validates bounded nonblank tenant/project/principal IDs, known actor kinds and a bounded array of role strings before consulting role grants. Static credential authentication requires one unambiguous explicitly enabled identity, a nonnegative safe integer epoch and the same scoped actor shape; shared credentials across enabled identities fail closed instead of selecting the first mapping. Returned identity data remains detached. These are runtime input/configuration checks, not live identity proofing, membership refresh or a replacement for the trusted host context.
+
 ## Managed intake service adapter
 
 `verifyIntakeService` validates one deployment-configured intake connection using its pinned managed credential and authenticated capability contract. The source returns no organization/client identity; an arbitrary upstream token therefore cannot establish a local tenant. The adapter refuses a credential whose fingerprint differs from the trusted mapping and never maps upstream scope strings into local roles. It returns only a local service identity with explicitly configured non-owner roles. Responses are bounded, redirects denied, engine versions pinned and required scopes checked. Tokens remain in credential/transport callbacks and are excluded from returned identity data.
