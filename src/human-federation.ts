@@ -94,7 +94,7 @@ export function createHumanFederationProvider(
   configuration: HumanFederationPolicy,
   clock: () => string,
 ): HumanSessionProvider {
-  let mappings: HumanFederationMapping[];
+  let mappings: readonly HumanFederationMapping[];
   try {
     invariant(
       verifier !== null &&
@@ -119,30 +119,34 @@ export function createHumanFederationProvider(
   const verify = verifier.verify.bind(verifier),
     maxAge = configuration.maxSessionAgeSeconds;
   const seen = new Set<string>();
-  for (const mapping of mappings) {
-    invariant(
-      mapping &&
-        typeof mapping === "object" &&
-        Object.keys(mapping).length === 5 &&
-        typeof mapping.enabled === "boolean",
-      "invalid_policy",
-      "Exact federation mappings required",
-    );
-    const trustedIssuer = issuer(mapping.issuer);
-    for (const value of [mapping.subject, mapping.audience])
-      nonempty(value, "Federation mapping", 256);
-    nonempty(mapping.actorId, "Federation actor", 128);
-    const key = JSON.stringify([
-      trustedIssuer,
-      mapping.subject,
-      mapping.audience,
-    ]);
-    invariant(
-      !seen.has(key),
-      "invalid_policy",
-      "Federation mapping must be unambiguous",
-    );
-    seen.add(key);
+  try {
+    for (const mapping of mappings) {
+      invariant(
+        mapping &&
+          typeof mapping === "object" &&
+          Object.keys(mapping).length === 5 &&
+          typeof mapping.enabled === "boolean",
+        "invalid_policy",
+        "Exact federation mappings required",
+      );
+      const trustedIssuer = issuer(mapping.issuer);
+      for (const value of [mapping.subject, mapping.audience])
+        nonempty(value, "Federation mapping", 256);
+      nonempty(mapping.actorId, "Federation actor", 128);
+      const key = JSON.stringify([
+        trustedIssuer,
+        mapping.subject,
+        mapping.audience,
+      ]);
+      invariant(
+        !seen.has(key),
+        "invalid_policy",
+        "Federation mapping must be unambiguous",
+      );
+      seen.add(key);
+    }
+  } catch {
+    throw new DomainError("invalid_policy", "Invalid federation mapping");
   }
   return {
     async authenticate(metadata, signal) {
