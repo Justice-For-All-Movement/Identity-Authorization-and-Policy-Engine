@@ -386,6 +386,41 @@ test("clock is sampled after policy loading, and captured key/context survive ca
   assert.deepEqual(await op, profile);
 });
 
+test("capability verification rejects a malformed durable record revision", async (t) => {
+  const f = await fixture(t);
+  const db: Database = {
+    transaction: (fn) =>
+      f.db.transaction((q) =>
+        fn({
+          query: async <T>(sql: string, v?: unknown[]) => {
+            const result = await q.query<T>(sql, v);
+            if (
+              sql.includes("SELECT") &&
+              sql.includes("FROM public.evidence_record")
+            ) {
+              return {
+                rows: result.rows.map(
+                  (row) => ({ ...(row as object), revision: 0 }) as T,
+                ),
+              };
+            }
+            return result;
+          },
+        }),
+      ),
+    close: async () => {},
+  };
+  await assert.rejects(
+    new RevocationRegistry(db, f.policy, () => c.now).verify(
+      viewer,
+      f.token,
+      expected,
+      f.key,
+    ),
+    { code: "invalid_revocation_state" },
+  );
+});
+
 test("corrupt durable revocation state fails closed across read, mutation and verification", async (t) => {
   const f = await fixture(t),
     id = digest({ aggregate: "identity-revocations" });
