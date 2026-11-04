@@ -138,7 +138,7 @@ test("ambiguous disabled malformed and mutable mappings are rejected before use"
         },
         () => now,
       ),
-    { code: "invalid_input" },
+    { code: "invalid_policy" },
   );
   assert.throws(
     () => createHumanFederationProvider({} as never, policy, () => now),
