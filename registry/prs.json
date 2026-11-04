@@ -4,7 +4,7 @@
   "roadmapVersion": 1,
   "planVerified": true,
   "plannedPrCount": 8,
-  "observedAt": "2026-11-04T22:16:29Z",
+  "observedAt": "2026-11-04T22:23:33Z",
   "units": [
     {
       "id": "IAP-001",
@@ -65,7 +65,9 @@
       "id": "IAP-003",
       "title": "Revocation and epoch invalidation",
       "origin": "original",
-      "prs": [],
+      "prs": [
+        18
+      ],
       "contributingPrs": [
         1
       ],
@@ -78,7 +80,10 @@
         "Revocation and epoch invalidation"
       ],
       "acceptanceCriteria": "Verify normal behavior and rejection paths with source-bound automated evidence. Live acceptance is separate.",
-      "implementationStatus": "library_implemented_local_tests_passed"
+      "implementationStatus": "in_review",
+      "acceptanceEvidence": [
+        "PR #18 validates exact bounded durable revocation state across read, mutation and verification; hosted exact-head CI is pending."
+      ]
     },
     {
       "id": "IAP-004",
@@ -223,6 +228,18 @@
       "mergedAt": "2026-11-04T22:16:28Z",
       "closedAt": "2026-11-04T22:16:29Z",
       "draft": false
+    },
+    {
+      "id": 5162479468,
+      "number": 18,
+      "title": "IAP-003: validate durable revocation state",
+      "state": "open",
+      "url": "https://github.com/neophilism/Identity-Authorization-and-Policy-Engine/pull/18",
+      "createdAt": "2026-11-04T22:23:33Z",
+      "updatedAt": "2026-11-04T22:23:33Z",
+      "mergedAt": null,
+      "closedAt": null,
+      "draft": true
     }
   ],
   "scopeNote": "PR1 contributes to IAP-001/002/003; PR2 and PR3 contribute to IAP-004. Live GitHub remains authority; implementation/test/CI/live evidence are separate."
