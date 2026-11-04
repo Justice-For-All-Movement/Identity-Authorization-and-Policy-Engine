@@ -4,7 +4,7 @@
   "roadmapVersion": 1,
   "planVerified": true,
   "plannedPrCount": 8,
-  "observedAt": "2026-11-04T22:32:00Z",
+  "observedAt": "2026-11-04T22:53:00Z",
   "units": [
     {
       "id": "IAP-001",
@@ -94,7 +94,8 @@
       "prs": [],
       "contributingPrs": [
         2,
-        3
+        3,
+        20
       ],
       "dependsOn": [
         "IAP-001"
@@ -105,7 +106,7 @@
         "Identity federation and intake adapter"
       ],
       "acceptanceCriteria": "Verify normal behavior and rejection paths with source-bound automated evidence. Live acceptance is separate.",
-      "implementationStatus": "Partial: merged PR2 supplies pinned managed intake service verification with explicit local non-owner identity mapping; it does not authenticate end users. PR3 snapshots trusted mappings and bounds credential/transport/body verification with cancellation, finite byte/chunk budgets, strict JSON UTF8 and sanitized failures. End-user federation, member provisioning and live host integration remain pending."
+      "implementationStatus": "Partial: merged PR2 supplies pinned managed intake service verification with explicit local non-owner identity mapping. PR3 snapshots trusted mappings and bounds credential/transport/body verification with cancellation, finite byte/chunk budgets, strict JSON UTF8 and sanitized failures. Draft PR20 adds a provider-neutral human federation boundary: exact enabled issuer/subject/audience mappings yield only bounded local actor IDs, claims cannot supply roles or scope, absolute freshness/expiry and cancellation fail closed, and current roles remain owned by membership-session resolution. Provider protocol/cryptography, automatic member provisioning/account linking/recovery and live host integration remain pending."
     },
     {
       "id": "IAP-005",
@@ -246,3 +247,4 @@
   ],
   "scopeNote": "PR1 contributes to IAP-001/002/003; PR2 and PR3 contribute to IAP-004. Live GitHub remains authority; implementation/test/CI/live evidence are separate."
 }
+
