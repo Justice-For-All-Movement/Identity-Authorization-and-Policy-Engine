@@ -16,6 +16,10 @@
       "types": "./dist/intake-service-adapter.d.ts",
       "default": "./dist/intake-service-adapter.js"
     },
+    "./human-federation": {
+      "types": "./dist/human-federation.d.ts",
+      "default": "./dist/human-federation.js"
+    },
     "./revocations": {
       "types": "./dist/revocations.d.ts",
       "default": "./dist/revocations.js"
@@ -59,3 +63,4 @@
     "@accountability/evidence": "github:neophilism/Evidence-Storage-and-Provenance-Engine#dce7105a70b42d77afe4cd48d34723331447037c"
   }
 }
+
