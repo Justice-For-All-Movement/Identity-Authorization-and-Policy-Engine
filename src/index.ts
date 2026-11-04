@@ -30,6 +30,7 @@ export function authorize(ctx:Context, action:Action, resource:Scope=ctx):void {
 }
 export type Capability = Scope & {id:string;actorId:string;action:Action;purpose:string;resourceIds:string[];policyRevision:number;actorEpoch:number;notBefore:string;expiresAt:string;};
 const CAPABILITY_FIELDS=['tenantId','projectId','id','actorId','action','purpose','resourceIds','policyRevision','actorEpoch','notBefore','expiresAt'] as const;
+const EXPECTED_FIELDS=['action','resourceId','policyRevision','actorEpoch','revokedIds'] as const;
 function validateCapability(value:unknown,code='invalid_capability'):asserts value is Capability{
  invariant(object(value)&&Object.keys(value).every(key=>(CAPABILITY_FIELDS as readonly string[]).includes(key))&&Object.keys(value).length===CAPABILITY_FIELDS.length,code,'Capability schema is invalid');
  invariant(identifier(value.tenantId)&&identifier(value.projectId)&&identifier(value.id)&&identifier(value.actorId),code,'Capability identifiers are invalid');
@@ -42,7 +43,8 @@ function validateCapability(value:unknown,code='invalid_capability'):asserts val
  invariant(expiresAt>notBefore&&expiresAt-notBefore<=3600000,code,'Capability duration is at most 1 hour');
 }
 function validateExpected(value:unknown):asserts value is {action:Action;resourceId:string;policyRevision:number;actorEpoch:number;revokedIds:readonly string[]}{
- invariant(object(value)&&(ACTIONS as readonly unknown[]).includes(value.action)&&identifier(value.resourceId),'invalid_capability','Expected capability scope is invalid');
+ invariant(object(value)&&Object.keys(value).every(key=>(EXPECTED_FIELDS as readonly string[]).includes(key))&&Object.keys(value).length===EXPECTED_FIELDS.length,'invalid_capability','Expected capability schema is invalid');
+ invariant((ACTIONS as readonly unknown[]).includes(value.action)&&identifier(value.resourceId),'invalid_capability','Expected capability scope is invalid');
  invariant(positiveInteger(value.policyRevision)&&nonnegativeInteger(value.actorEpoch),'invalid_capability','Expected capability revisions are invalid');
  invariant(Array.isArray(value.revokedIds)&&value.revokedIds.length<=10000&&value.revokedIds.every(identifier),'invalid_capability','Capability revocations are invalid');
 }
