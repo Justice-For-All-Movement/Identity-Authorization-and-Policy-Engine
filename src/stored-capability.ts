@@ -87,6 +87,11 @@ export async function verifyStoredCapability(
     digest({ aggregate: "identity-revocations" }),
   );
   invariant(row, "not_initialized", "Revocations unavailable");
+  invariant(
+    Number.isSafeInteger(row.revision) && row.revision > 0,
+    "invalid_revocation_state",
+    "Positive revocation record revision required",
+  );
   validateRevocationState(row.value);
   const state = row.value;
   const now = clock();
