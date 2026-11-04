@@ -4,7 +4,7 @@
   "roadmapVersion": 1,
   "planVerified": true,
   "plannedPrCount": 8,
-  "observedAt": "2026-11-04T22:06:16Z",
+  "observedAt": "2026-11-04T22:06:34Z",
   "units": [
     {
       "id": "IAP-001",
@@ -210,13 +210,13 @@
       "draft": false
     },
     {
-      "id": 5162408512,
+      "id": 5162372731,
       "number": 16,
       "title": "IAP-002: harden signed capability boundaries",
       "state": "open",
       "url": "https://github.com/neophilism/Identity-Authorization-and-Policy-Engine/pull/16",
       "createdAt": "2026-11-04T22:06:16Z",
-      "updatedAt": "2026-11-04T22:06:16Z",
+      "updatedAt": "2026-11-04T22:06:34Z",
       "mergedAt": null,
       "closedAt": null,
       "draft": true
