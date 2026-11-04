@@ -386,6 +386,59 @@ test("clock is sampled after policy loading, and captured key/context survive ca
   assert.deepEqual(await op, profile);
 });
 
+test("corrupt durable revocation state fails closed across read, mutation and verification", async (t) => {
+  const f = await fixture(t),
+    id = digest({ aggregate: "identity-revocations" });
+  const malformed = [
+    { policyRevision: 0, actorEpochs: [], revokedIds: [] },
+    { policyRevision: 1, actorEpochs: "invalid", revokedIds: [] },
+    {
+      policyRevision: 1,
+      actorEpochs: [
+        { actorId: "reader", epoch: 1 },
+        { actorId: "reader", epoch: 2 },
+      ],
+      revokedIds: [],
+    },
+    {
+      policyRevision: 1,
+      actorEpochs: [],
+      revokedIds: ["grant", "grant"],
+    },
+    {
+      policyRevision: 1,
+      actorEpochs: [],
+      revokedIds: [],
+      unexpected: true,
+    },
+  ];
+  for (const [index, state] of malformed.entries()) {
+    const before = await f.registry.read(c);
+    const saved = await scoped(f.db, c, (tx) =>
+      tx.put("identity-revocations", id, before.revision, state),
+    );
+    await assert.rejects(f.registry.read(c), {
+      code: "invalid_revocation_state",
+    });
+    await assert.rejects(
+      f.registry.apply(
+        c,
+        saved.revision,
+        { type: "advance-policy" },
+        `corrupt-${index}`,
+      ),
+      { code: "invalid_revocation_state" },
+    );
+    await assert.rejects(
+      f.registry.verify(viewer, f.token, expected, f.key),
+      { code: "invalid_revocation_state" },
+    );
+    await scoped(f.db, c, (tx) =>
+      tx.put("identity-revocations", id, saved.revision, before.state),
+    );
+  }
+});
+
 test("exhausted epochs and bounded registries reject rather than wrap or discard old revocations", async (t) => {
   const f = await fixture(t),
     id = digest({ aggregate: "identity-revocations" });
