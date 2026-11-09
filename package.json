@@ -35,6 +35,10 @@
     "./membership-http": {
       "types": "./dist/membership-http.d.ts",
       "default": "./dist/membership-http.js"
+    },
+    "./service-kit": {
+      "types": "./dist/service-kit.d.ts",
+      "default": "./dist/service-kit.js"
     }
   },
   "engines": {
@@ -50,9 +54,11 @@
     "typecheck:postgres": "tsc --noEmit -p tsconfig.postgres.json"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.12",
     "@types/node": "26.6.5",
-    "typescript": "7.0.2",
-    "@electric-sql/pglite": "0.5.12"
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.1",
+    "typescript": "7.0.2"
   },
   "files": [
     "dist",
@@ -63,4 +69,3 @@
     "@accountability/evidence": "github:neophilism/Evidence-Storage-and-Provenance-Engine#dce7105a70b42d77afe4cd48d34723331447037c"
   }
 }
-
