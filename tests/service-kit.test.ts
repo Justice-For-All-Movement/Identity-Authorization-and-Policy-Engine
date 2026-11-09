@@ -76,9 +76,12 @@ test('postgres: migrations, events, idempotency, audit, jobs', needsPg, async ()
 
     // audit chain, concurrent appends
     await Promise.all(Array.from({ length: 8 }, (_, i) => sql.tx((tx) => kit.appendAudit(tx, 'demo', ctx(), 'did', `E01:thing:${i}`, { i }))));
+    // sequences must order numerically, not lexically, once they pass 9
+    for (let i = 8; i < 25; i++) await sql.tx(async (tx) => { await kit.appendAudit(tx, 'demo', ctx(), 'did', `E01:thing:${i}`, { i }); await kit.emitEvent(tx, 'demo', ctx({ tenantId: 't3' }), 'n', 'E01:thing:n', { i }); });
+    assert.deepEqual((await kit.readEvents(sql, 'demo', { tenantId: 't3' })).map((e) => (e.payload as { i: number }).i), Array.from({ length: 17 }, (_, i) => i + 8));
     await sql.tx((tx) => kit.appendAudit(tx, 'demo', ctx({ tenantId: 't2' }), 'did', 'E01:thing:z'));
     const chain = await kit.listAudit(sql, 'demo', ctx(), { allProjects: true });
-    assert.equal(chain.length, 8); assert.ok(kit.verifyAuditChain(chain));
+    assert.equal(chain.length, 25); assert.ok(kit.verifyAuditChain(chain));
     assert.ok(!kit.verifyAuditChain(chain.map((r, i) => i === 3 ? { ...r, action: 'tampered' } : r)));
     assert.equal((await kit.listAudit(sql, 'demo', ctx({ tenantId: 't2' }))).length, 1);
 

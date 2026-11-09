@@ -10,7 +10,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { DomainError, canonical, invariant } from './contracts.ts';
 import type { Actor, Context, Json, Scope } from './contracts.ts';
 
-export const SERVICE_KIT_VERSION = '1.0.0';
+export const SERVICE_KIT_VERSION = '1.0.1';
 
 // ───────────────────────────── SQL ─────────────────────────────
 export type Row = Record<string, unknown>;
@@ -258,8 +258,8 @@ export async function emitEvent(tx: Sql, schema: string, ctx: Context, type: str
 export async function readEvents(sql: Sql, schema: string, options: { after?: string; limit?: number; tenantId?: string } = {}): Promise<EngineEvent[]> {
   const limit = Math.min(Math.max(options.limit ?? 200, 1), 1000);
   const rows = await sql.query<{ seq: string; tenant_id: string; project_id: string; type: string; subject: string; payload: Json; actor_id: string; request_id: string; occurred_at: Date }>(
-    `select seq::text as seq, tenant_id, project_id, type, subject, payload, actor_id, request_id, occurred_at from ${ident(schema)}._events
-     where seq > $1::bigint and xid < pg_snapshot_xmin(pg_current_snapshot()) and ($2::text is null or tenant_id = $2) order by seq limit ${limit}`,
+    `select e.seq::text as seq, e.tenant_id, e.project_id, e.type, e.subject, e.payload, e.actor_id, e.request_id, e.occurred_at from ${ident(schema)}._events e
+     where e.seq > $1::bigint and e.xid < pg_snapshot_xmin(pg_current_snapshot()) and ($2::text is null or e.tenant_id = $2) order by e.seq limit ${limit}`,
     [options.after ?? '0', options.tenantId ?? null]);
   return rows.map((r) => ({ id: r.seq, tenantId: r.tenant_id, projectId: r.project_id, type: r.type, subject: r.subject, payload: r.payload, actorId: r.actor_id, requestId: r.request_id, occurredAt: new Date(r.occurred_at).toISOString() }));
 }
@@ -295,7 +295,7 @@ function auditHash(r: Omit<AuditRecord, 'id' | 'hash'>): string {
 export async function appendAudit(tx: Sql, schema: string, ctx: Context, action: string, subject: string, detail: Json = {}): Promise<void> {
   const s = ident(schema);
   await tx.query('select pg_advisory_xact_lock(hashtext($1))', [`kit-audit:${s}:${ctx.tenantId}`]);
-  const last = (await tx.query<{ tenant_seq: string; hash: string }>(`select tenant_seq::text as tenant_seq, hash from ${s}._audit where tenant_id=$1 order by tenant_seq desc limit 1`, [ctx.tenantId]))[0];
+  const last = (await tx.query<{ tenant_seq: string; hash: string }>(`select a.tenant_seq::text as tenant_seq, a.hash from ${s}._audit a where a.tenant_id=$1 order by a.tenant_seq desc limit 1`, [ctx.tenantId]))[0];
   const at = new Date(ctx.now).toISOString();
   const base = { tenantId: ctx.tenantId, projectId: ctx.projectId, tenantSeq: last === undefined ? 1 : Number(last.tenant_seq) + 1, action, subject, detail: JSON.parse(JSON.stringify(detail)) as Json, actorId: ctx.actor.id, actorKind: ctx.actor.kind, purpose: ctx.purpose, requestId: ctx.requestId, at, previousHash: last?.hash ?? '' };
   await tx.query(`insert into ${s}._audit (tenant_id, project_id, tenant_seq, action, subject, detail, actor_id, actor_kind, purpose, request_id, at, previous_hash, hash) values ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13)`,
@@ -304,8 +304,8 @@ export async function appendAudit(tx: Sql, schema: string, ctx: Context, action:
 export async function listAudit(sql: Sql, schema: string, scope: Scope, options: { after?: string; limit?: number; subject?: string; allProjects?: boolean } = {}): Promise<AuditRecord[]> {
   const limit = Math.min(Math.max(options.limit ?? 200, 1), 1000);
   const rows = await sql.query<Record<string, unknown>>(
-    `select seq::text as seq, tenant_id, project_id, tenant_seq::text as tenant_seq, action, subject, detail, actor_id, actor_kind, purpose, request_id, at, previous_hash, hash from ${ident(schema)}._audit
-     where tenant_id=$1 and ($2::text is null or project_id=$2) and seq > $3::bigint and ($4::text is null or subject=$4) order by seq limit ${limit}`,
+    `select a.seq::text as seq, a.tenant_id, a.project_id, a.tenant_seq::text as tenant_seq, a.action, a.subject, a.detail, a.actor_id, a.actor_kind, a.purpose, a.request_id, a.at, a.previous_hash, a.hash from ${ident(schema)}._audit a
+     where a.tenant_id=$1 and ($2::text is null or a.project_id=$2) and a.seq > $3::bigint and ($4::text is null or a.subject=$4) order by a.seq limit ${limit}`,
     [scope.tenantId, options.allProjects === true ? null : scope.projectId, options.after ?? '0', options.subject ?? null]);
   return rows.map((r) => ({ id: r.seq as string, tenantId: r.tenant_id as string, projectId: r.project_id as string, tenantSeq: Number(r.tenant_seq), action: r.action as string, subject: r.subject as string, detail: r.detail as Json, actorId: r.actor_id as string, actorKind: r.actor_kind as string, purpose: r.purpose as string, requestId: r.request_id as string, at: new Date(r.at as Date).toISOString(), previousHash: r.previous_hash as string, hash: r.hash as string }));
 }
