@@ -29,6 +29,8 @@ test('tokens: sign, verify, expiry, tamper, revocation, wildcard denial', async 
   await denied('garbage');
   assert.throws(() => kit.requireCapability(c, 'evidence:write'), (e: unknown) => e instanceof DomainError && e.code === 'forbidden');
   kit.requireCapability({ ...c, capabilities: ['evidence:*'] }, 'evidence:write');
+  for (const action of kit.SENSITIVE_ACTIONS) assert.throws(() => kit.requireCapability({ ...c, capabilities: ['x:*'] }, `x:${action}`), (e: unknown) => e instanceof DomainError && e.code === 'forbidden');
+  kit.requireCapability({ ...c, capabilities: ['x:publish'] }, 'x:publish');
   assert.throws(() => kit.requireCapability(undefined as unknown as kit.ServiceContext, 'x:y'), (e: unknown) => e instanceof DomainError && e.code === 'unauthenticated');
 });
 

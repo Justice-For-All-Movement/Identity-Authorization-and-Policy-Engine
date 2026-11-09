@@ -133,10 +133,16 @@ export type ServiceContext = Context & Readonly<{
   locale?: string;
 }>;
 
+/**
+ * Actions that move information or value out of the system, or change who may do so. They are never satisfied by an
+ * `engine:*` wildcard: a role must name them exactly (research permission does not imply disclosure, contact, release or spend).
+ */
+export const SENSITIVE_ACTIONS: readonly string[] = ['disclose_identity', 'contact', 'send', 'publish', 'approve', 'spend', 'grant', 'admin', 'export', 'withdraw', 'events'];
 export function hasCapability(ctx: ServiceContext, capability: string): boolean {
   if (ctx.capabilities.includes(capability)) return true;
   const colon = capability.indexOf(':');
-  return colon > 0 && ctx.capabilities.includes(`${capability.slice(0, colon)}:*`);
+  if (colon <= 0 || SENSITIVE_ACTIONS.includes(capability.slice(colon + 1))) return false;
+  return ctx.capabilities.includes(`${capability.slice(0, colon)}:*`);
 }
 /** Fails closed: any missing or malformed context denies. */
 export function requireCapability(ctx: ServiceContext, capability: string): void {
