@@ -125,7 +125,7 @@ export function createEngine(deps: EngineDeps) {
 
   /** One-time creation of the first organization and its owner. Refuses once any deployment bootstrap has happened. */
   async function bootstrapFirstAdministrator(input: { login: string; password: string; displayName: string; organization: OrganizationInput; bootstrapToken?: string }, options: { requireToken?: boolean } = {}): Promise<{ organization: Organization; project: Project; actorId: string }> {
-    if (options.requireToken === true && cfg.bootstrapToken === undefined) throw new DomainError('unavailable', 'IDENTITY_BOOTSTRAP_TOKEN is not configured; bootstrap over HTTP is disabled');
+    if (options.requireToken === true && cfg.bootstrapToken === undefined) throw new DomainError('forbidden', 'Bootstrap over HTTP is disabled: IDENTITY_BOOTSTRAP_TOKEN is not configured');
     if (cfg.bootstrapToken !== undefined) invariant(typeof input.bootstrapToken === 'string' && sameHash(sha256(input.bootstrapToken), sha256(cfg.bootstrapToken)), 'forbidden', 'Bootstrap is not permitted');
     return sql.tx(async (tx) => {
       await tx.query('select pg_advisory_xact_lock(hashtext($1))', ['e01-bootstrap']);
