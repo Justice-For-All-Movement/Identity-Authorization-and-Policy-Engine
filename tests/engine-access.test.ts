@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { hasCapability } from '../src/service-kit.ts';
 import type { ServiceContext } from '../src/service-kit.ts';
 import { createEngine } from '../src/engine/index.ts';
-import { PASSWORD, baseConfig, code, needsPg, withWorld } from './engine-fixture.ts';
+import { PASSWORD, baseConfig, code, needsPg, settled, withWorld } from './engine-fixture.ts';
 
 const future = (seconds: number): string => new Date(Date.now() + seconds * 1000).toISOString();
 
@@ -150,7 +150,7 @@ test('purpose grants: exact, time-bounded, revocable, bounded and never implied 
     assert.equal((await w.engine.authorize(fin, { capability: 'resources:spend' })).allowed, false);
     await assert.rejects(verify(finToken.token, { requestId: 'r' }), code('unauthenticated'));
     assert.ok(!hasCapability(await w.ctx(ivy.session, 'finance'), 'resources:spend'));
-    const feed = await w.engine.events({ ...admin, capabilities: ['identity:events'] }, { limit: 1000 });
+    const feed = await settled(() => w.engine.events({ ...admin, capabilities: ['identity:events'] }, { limit: 1000 }), 'grant.revoked');
     assert.ok(feed.some((e) => e.type === 'grant.issued' && e.subject === `E01:grant:${g3.id}`) && feed.some((e) => e.type === 'grant.revoked' && e.subject === `E01:grant:${g3.id}`));
     const inspected = await w.engine.inspect(admin, `E01:grant:${g3.id}`);
     assert.equal(inspected?.state, 'revoked'); assert.equal(inspected?.blocked, true); assert.ok(inspected!.history.some((h) => h.action === 'grant.revoked'));
@@ -176,7 +176,7 @@ test('service and agent identities: bounded tokens, no administration, no secret
     assert.equal(svc.actor.kind, 'service');
     assert.ok(hasCapability(svc, 'evidence:write') && hasCapability(svc, 'evidence:events') && svc.capabilities.includes('identity:issue_token'));
     for (const cap of ['identity:admin', 'identity:grant', 'release:publish', 'correspondence:send', 'resources:spend']) assert.ok(!hasCapability(svc, cap), cap);
-    assert.equal((await w.engine.events(svc)).length > 0, true);
+    assert.equal((await settled(() => w.engine.events(svc), 'membership.changed')).length > 0, true);
     await assert.rejects(w.engine.createUser(svc, { login: 'x@example.org', password: PASSWORD, displayName: 'X' }), code('forbidden'));
     await assert.rejects(w.engine.createGrant(svc, { actorId: w.ownerId, capability: 'release:publish', purpose: 'release', reason: 'x', expiresAt: future(60) }), code('forbidden'));
     // humans cannot use a service sign-in and services have no password login
@@ -282,6 +282,21 @@ test('signing keys: sealed at rest, rotation keeps old tokens valid until expiry
     await assert.rejects(w.engine.rotateSigningKey(adminB), code('forbidden'));
     const al = await w.user('al@example.org', ['admin'], '*');
     await assert.rejects(w.engine.rotateSigningKey(await w.ctx(al.session, 'administration')), code('forbidden'));
+    // two owners removing each other at the same time: exactly one change wins and an owner remains
+    const cy = await w.user('cy@example.org', ['owner'], '*');
+    const [adaCtx, cyCtx] = [await w.admin(), await w.ctx(cy.session, 'administration')];
+    const race = await Promise.allSettled([w.engine.removeMember(adaCtx, { actorId: cy.id, projectId: '*' }), w.engine.removeMember(cyCtx, { actorId: w.ownerId, projectId: '*' })]);
+    assert.equal(race.filter((r) => r.status === 'fulfilled').length, 1);
+    assert.equal((await w.sql.query(`select 1 from e01_identity.memberships where tenant_id='org-a' and project_id='*' and status='active' and 'owner' = any(roles)`)).length, 1);
+    if (race[0]!.status === 'rejected') { await w.engine.setMembership(await w.ctx(cy.session, 'administration'), { actorId: w.ownerId, projectId: '*', roles: ['owner'] }); }
+    // archiving a project ends its tokens
+    const pa = await w.admin();
+    await w.engine.createProject(pa, { id: 'old', name: 'Old project' });
+    await w.engine.setMembership(pa, { actorId: w.ownerId, projectId: 'old', roles: ['investigator'] });
+    const oldToken = await w.engine.issueAccessToken({ refreshToken: w.owner.refreshToken, tenantId: 'org-a', projectId: 'old', purpose: 'research' });
+    await w.engine.updateProject(await w.admin(), 'old', { status: 'archived' });
+    await assert.rejects(verify(oldToken.token, { requestId: 'r' }), code('unauthenticated'));
+    await assert.rejects(w.engine.issueAccessToken({ refreshToken: w.owner.refreshToken, tenantId: 'org-a', projectId: 'old', purpose: 'research' }), code('forbidden'));
     // maintenance rotates keys past the configured age
     await w.sql.query(`update e01_identity.signing_keys set created_at = now() - interval '40 days' where status='active'`);
     assert.notEqual((await w.engine.host.maintenance({ rotateKeysOlderThanSeconds: 30 * 86400 })).rotated, null);

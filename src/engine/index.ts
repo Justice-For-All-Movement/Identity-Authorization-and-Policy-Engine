@@ -229,6 +229,8 @@ export function createEngine(deps: EngineDeps) {
 
   // ───────────────────────── actors & memberships ─────────────────────────
   async function applyMembership(tx: Sql, ctx: ServiceContext, actor: R, projectId: string, roles: readonly string[], status: 'active' | 'suspended' | 'removed', expiresAt: Date | null): Promise<R> {
+    // Serializes policy changes per organization so concurrent changes cannot both pass the owner checks.
+    await tx.query(`select 1 from ${S}.organizations where id=$1 for update`, [ctx.tenantId]);
     if (projectId !== ORG_WIDE) invariant((await tx.query(`select 1 from ${S}.projects where tenant_id=$1 and id=$2`, [ctx.tenantId, projectId])).length > 0, 'not_found', 'Not found');
     const defs = new Map((await tx.query<R>(`select * from ${S}.roles where tenant_id=$1 and not deleted`, [ctx.tenantId])).map((r) => [r.name as string, r]));
     invariant(Array.isArray(roles) && roles.length <= 32 && (status === 'removed' || roles.length > 0), 'invalid_input', 'At least one role is required');
@@ -708,6 +710,7 @@ export function createEngine(deps: EngineDeps) {
   async function revokeActor(ctx: ServiceContext, input: { actorId: string; reason: string; disable?: boolean }): Promise<void> {
     await needNow(ctx, 'identity:admin');
     await sql.tx(async (tx) => {
+      await tx.query(`select 1 from ${S}.organizations where id=$1 for update`, [ctx.tenantId]);
       const actor = await memberActor(tx, ctx.tenantId, input.actorId);
       invariant(actor !== undefined, 'not_found', 'Not found');
       const st = await tx.query<R>(`select roles from ${S}.memberships where tenant_id=$1 and actor_id=$2 and status='active'`, [ctx.tenantId, input.actorId]);

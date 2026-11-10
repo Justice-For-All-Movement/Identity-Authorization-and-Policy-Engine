@@ -282,12 +282,13 @@ export function createKernel(deps: EngineDeps) {
     const row = (await sql.query<R>(`select
         exists(select 1 from ${S}.token_revocations where tenant_id=$1 and jti=$2) as jti_revoked,
         (select status from ${S}.organizations where id=$1) as org_status,
+        (select status from ${S}.projects where tenant_id=$1 and id=$6) as project_status,
         (select status from ${S}.actors where id=$3) as actor_status,
         (select kind from ${S}.actors where id=$3) as actor_kind,
         (select min_policy_version::text from ${S}.actor_revocations where tenant_id=$1 and actor_id=$3) as min_pv,
         (select case when revoked_at is null and expires_at > $5 and actor_id = $3 then 'ok' else 'ended' end from ${S}.sessions where id=$4) as session_state`,
-      [claims.tid, claims.jti, claims.sub, sid, clock().toISOString()]))[0] as R;
-    let revoked = row.jti_revoked === true || row.org_status !== 'active' || row.actor_status !== 'active' || row.actor_kind !== claims.kind || (sid !== null && row.session_state !== 'ok');
+      [claims.tid, claims.jti, claims.sub, sid, clock().toISOString(), claims.pid]))[0] as R;
+    let revoked = row.jti_revoked === true || row.org_status !== 'active' || row.project_status !== 'active' || row.actor_status !== 'active' || row.actor_kind !== claims.kind || (sid !== null && row.session_state !== 'ok');
     if (!revoked && row.min_pv !== null) { try { revoked = BigInt(claims.pv) < BigInt(row.min_pv as string); } catch { revoked = true; } }
     if (revocationCache.size > 20000) revocationCache.clear();
     revocationCache.set(claims.jti, { at: Date.now(), revoked });

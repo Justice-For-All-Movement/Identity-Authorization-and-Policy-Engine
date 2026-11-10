@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { SENSITIVE_ACTIONS, hasCapability, signAccessToken, generateSigningKey, verifyAuditChain } from '../src/service-kit.ts';
 import type { ServiceContext } from '../src/service-kit.ts';
 import { DEFAULT_ROLES, createEngine, migrate } from '../src/engine/index.ts';
-import { PASSWORD, baseConfig, code, needsPg, withWorld } from './engine-fixture.ts';
+import { PASSWORD, baseConfig, code, needsPg, settled, withWorld } from './engine-fixture.ts';
 
 const future = (seconds: number): string => new Date(Date.now() + seconds * 1000).toISOString();
 
@@ -112,7 +112,8 @@ test('tokens are scoped to one organization, project and purpose; research impli
     assert.equal((await w.engine.authorize(forged, { capability: 'evidence:export' })).reason, 'sensitive_capability_not_granted');
     assert.equal((await w.engine.authorize({ ...ivyCtx, capabilities: ['release:*'] }, { capability: 'release:publish' })).reason, 'not_in_token');
     // the denial of an identity disclosure is audited and emitted
-    const events = await w.engine.events({ ...(await w.admin()), capabilities: ['identity:events'] });
+    const eventCtx = { ...(await w.admin()), capabilities: ['identity:events'] };
+    const events = await settled(() => w.engine.events(eventCtx, { limit: 1000 }), 'disclosure.denied');
     assert.ok(events.some((e) => e.type === 'disclosure.denied' && e.subject === `E01:actor:${ivy.id}`));
     const explained = await w.engine.explain(await w.admin(), ivy.id, 'release:publish', undefined, { purpose: 'release' });
     assert.equal(explained.allowed, false); assert.match(explained.trail.map((s) => s.detail).join(' | '), /No current role names release:publish exactly/);
@@ -248,7 +249,8 @@ test('role and membership changes take effect on the next authorize and bump the
     assert.equal((await w.engine.authorize(c5, { capability: 'evidence:read' })).allowed, false);
     assert.deepEqual((await w.engine.sessionDirectory(rae.session.refreshToken)).organizations, []);
     // events let other engines drop caches
-    const feed = await w.engine.events({ ...admin, capabilities: ['identity:events'] }, { limit: 1000 });
+    await w.engine.createCompartment(admin, { id: 'marker' });
+    const feed = await settled(() => w.engine.events({ ...admin, capabilities: ['identity:events'] }, { limit: 1000 }), 'compartment.changed');
     for (const type of ['membership.changed', 'role.changed', 'policy.changed']) assert.ok(feed.some((e) => e.type === type), type);
     assert.ok(feed.every((e) => e.tenantId === 'org-a' && e.engine === 'E01'));
     await assert.rejects(w.engine.events(admin), code('forbidden'));

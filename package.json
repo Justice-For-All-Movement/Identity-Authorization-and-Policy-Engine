@@ -74,7 +74,7 @@
     "docs"
   ],
   "dependencies": {
-    "@accountability/evidence": "github:neophilism/Evidence-Storage-and-Provenance-Engine#dce7105a70b42d77afe4cd48d34723331447037c",
+    "@accountability/evidence": "github:Justice-For-All-Movement/Evidence-Storage-and-Provenance-Engine#dce7105a70b42d77afe4cd48d34723331447037c",
     "pg": "8.23.1"
   }
 }

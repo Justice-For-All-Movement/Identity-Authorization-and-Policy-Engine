@@ -35,3 +35,16 @@ export function withWorld(fn: (w: World) => Promise<void>, config: EngineConfig 
     await fn({ sql, url, engine, owner, ownerId: boot.actorId, orgId: 'org-a', ctx, admin, user });
   });
 }
+
+/**
+ * The kit's event feed withholds rows while any older transaction on the PostgreSQL server is still in flight
+ * (gap safety). Other suites share this server, so tests poll the feed until it has settled past the last write.
+ */
+export async function settled<T extends { type: string }>(read: () => Promise<T[]>, lastType: string, timeoutMs = 30000): Promise<T[]> {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const feed = await read();
+    if (feed.some((e) => e.type === lastType) || Date.now() > until) return feed;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import { createTokenVerifier, hasCapability, withDisposableDatabase } from '../src/service-kit.ts';
 import { start } from '../src/engine/serve.ts';
-import { ADMIN_URL, PASSWORD, needsPg } from './engine-fixture.ts';
+import { ADMIN_URL, PASSWORD, needsPg, settled } from './engine-fixture.ts';
 
 test('HTTP API end to end with the standalone server', needsPg, async () => {
   await withDisposableDatabase(pg, ADMIN_URL, async (url) => {
@@ -87,7 +87,7 @@ test('HTTP API end to end with the standalone server', needsPg, async () => {
       const svc = (await call('POST', '/v1/services', { name: 'Orchestrator', roles: ['service_orchestrator'], projectId: '*' }, admin)).json;
       const svcToken = (await call('POST', '/v1/tokens/service', { serviceId: svc.service.id, secret: svc.secret, projectId: 'main', purpose: 'operations' })).json.token as string;
       assert.equal((await call('POST', '/v1/tokens/service', { serviceId: svc.service.id, secret: 'wrong', projectId: 'main', purpose: 'operations' })).status, 401);
-      const events = (await call('GET', '/v1/events?limit=1000', undefined, svcToken)).json;
+      const events = await settled(async () => (await call('GET', '/v1/events?limit=1000', undefined, svcToken)).json as { type: string }[], 'grant.revoked') as any[];
       assert.ok(events.some((e: any) => e.type === 'grant.revoked') && events.every((e: any) => e.tenantId === 'org-a'));
       assert.deepEqual((await call('POST', '/v1/upstream-changes', { eventId: 'x', kind: 'source_corrected', refs: [], reason: 'r' }, svcToken)).json, { affected: [] });
       const agent = (await call('POST', '/v1/agents', { name: 'Research agent', roles: ['agent_researcher'] }, admin)).json;
