@@ -41,6 +41,13 @@ test('urefs', () => {
   assert.throws(() => kit.parseUref('nope'));
 });
 
+// The feed withholds events while ANY older transaction on the server is open (gap safety), so on a shared server
+// a just-committed event can appear a moment later. Reads that expect visibility poll; "not yet visible" checks do not.
+async function eventually<T>(read: () => Promise<T>, ok: (v: T) => boolean, ms = 20_000): Promise<T> {
+  const end = Date.now() + ms; let v = await read();
+  while (!ok(v) && Date.now() < end) { await new Promise((r) => setTimeout(r, 50)); v = await read(); }
+  return v;
+}
 test('postgres: migrations, events, idempotency, audit, jobs', needsPg, async () => {
   await kit.withDisposableDatabase(pg, ADMIN, async (_url, sql) => {
     const migrations = [{ id: '001', sql: 'create table {s}.thing (id text primary key)' }];
@@ -55,9 +62,9 @@ test('postgres: migrations, events, idempotency, audit, jobs', needsPg, async ()
       await assert.rejects(tx.tx(async (inner) => { await kit.emitEvent(inner, 'demo', ctx(), 'a.bad', 'E01:thing:1', {}); throw new Error('inner'); }));
       await kit.emitEvent(tx, 'demo', ctx({ tenantId: 't2' }), 'a.created', 'E01:thing:2', { n: 2 });
     });
-    const all = await kit.readEvents(sql, 'demo');
+    const all = await eventually(() => kit.readEvents(sql, 'demo'), (v) => v.length >= 2);
     assert.deepEqual(all.map((e) => e.type), ['a.created', 'a.created']);
-    assert.equal((await kit.readEvents(sql, 'demo', { tenantId: 't2' })).length, 1);
+    assert.equal((await eventually(() => kit.readEvents(sql, 'demo', { tenantId: 't2' }), (v) => v.length >= 1)).length, 1);
     assert.equal((await kit.readEvents(sql, 'demo', { after: all[1]!.id })).length, 0);
     // in-flight transaction hides its own and later events from readers (gap safety)
     let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
@@ -66,7 +73,7 @@ test('postgres: migrations, events, idempotency, audit, jobs', needsPg, async ()
     await sql.tx((tx) => kit.emitEvent(tx, 'demo', ctx(), 'fast', 'E01:thing:4', {}));
     assert.equal((await kit.readEvents(sql, 'demo', { after: all[1]!.id })).length, 0);
     release(); await slow;
-    assert.deepEqual((await kit.readEvents(sql, 'demo', { after: all[1]!.id })).map((e) => e.type), ['slow', 'fast']);
+    assert.deepEqual((await eventually(() => kit.readEvents(sql, 'demo', { after: all[1]!.id }), (v) => v.length >= 2)).map((e) => e.type), ['slow', 'fast']);
 
     // idempotency
     let calls = 0;
@@ -78,7 +85,7 @@ test('postgres: migrations, events, idempotency, audit, jobs', needsPg, async ()
     await Promise.all(Array.from({ length: 8 }, (_, i) => sql.tx((tx) => kit.appendAudit(tx, 'demo', ctx(), 'did', `E01:thing:${i}`, { i }))));
     // sequences must order numerically, not lexically, once they pass 9
     for (let i = 8; i < 25; i++) await sql.tx(async (tx) => { await kit.appendAudit(tx, 'demo', ctx(), 'did', `E01:thing:${i}`, { i }); await kit.emitEvent(tx, 'demo', ctx({ tenantId: 't3' }), 'n', 'E01:thing:n', { i }); });
-    assert.deepEqual((await kit.readEvents(sql, 'demo', { tenantId: 't3' })).map((e) => (e.payload as { i: number }).i), Array.from({ length: 17 }, (_, i) => i + 8));
+    assert.deepEqual((await eventually(() => kit.readEvents(sql, 'demo', { tenantId: 't3' }), (v) => v.length >= 17)).map((e) => (e.payload as { i: number }).i), Array.from({ length: 17 }, (_, i) => i + 8));
     await sql.tx((tx) => kit.appendAudit(tx, 'demo', ctx({ tenantId: 't2' }), 'did', 'E01:thing:z'));
     const chain = await kit.listAudit(sql, 'demo', ctx(), { allProjects: true });
     assert.equal(chain.length, 25); assert.ok(kit.verifyAuditChain(chain));
