@@ -39,6 +39,14 @@
     "./service-kit": {
       "types": "./dist/service-kit.d.ts",
       "default": "./dist/service-kit.js"
+    },
+    "./engine": {
+      "types": "./dist/engine/index.d.ts",
+      "default": "./dist/engine/index.js"
+    },
+    "./serve": {
+      "types": "./dist/engine/serve.d.ts",
+      "default": "./dist/engine/serve.js"
     }
   },
   "engines": {
@@ -51,13 +59,13 @@
     "build": "tsc -p tsconfig.build.json",
     "prepare": "npm run build",
     "test:postgres": "npm run typecheck:postgres && node --test integration/postgres-revocations.test.ts",
-    "typecheck:postgres": "tsc --noEmit -p tsconfig.postgres.json"
+    "typecheck:postgres": "tsc --noEmit -p tsconfig.postgres.json",
+    "serve": "node src/engine/serve.ts"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.12",
     "@types/node": "26.6.5",
     "@types/pg": "^8.23.1",
-    "pg": "^8.23.1",
     "typescript": "7.0.2"
   },
   "files": [
@@ -66,6 +74,7 @@
     "docs"
   ],
   "dependencies": {
-    "@accountability/evidence": "github:neophilism/Evidence-Storage-and-Provenance-Engine#dce7105a70b42d77afe4cd48d34723331447037c"
+    "@accountability/evidence": "github:neophilism/Evidence-Storage-and-Provenance-Engine#dce7105a70b42d77afe4cd48d34723331447037c",
+    "pg": "8.23.1"
   }
 }
