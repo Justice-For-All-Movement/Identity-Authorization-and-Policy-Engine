@@ -167,7 +167,7 @@ host.issueServiceToken(input: { tenantId; serviceId; projectId; purpose; capabil
 `OrganizationInput = { id?; name; branding?; defaultLocale?; languages?; jurisdiction?; policyConfig?; project?: { id?; name; kind?; identityProfile? } }`
 (the first project defaults to id `main`). Bootstrap refuses (`conflict`) once any organization exists; concurrent
 attempts are serialized. Login failures are counted per login name, existing or not; unknown logins take the same
-scrypt time. Refresh tokens are opaque `<sessionId>.<secret>`, stored hashed, not rotated.
+scrypt time. Refresh tokens are opaque `<sessionId>.<secret>`, stored hashed, rotated on request (see section 7).
 
 ### Decisions (kit `AuthorizationPort`)
 
