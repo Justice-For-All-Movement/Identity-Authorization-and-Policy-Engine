@@ -101,6 +101,10 @@ create table {s}.intake_connections (
   epoch int not null default 1, enabled boolean not null default true, verified_at timestamptz, upstream_version text, upstream_scope_digest text,
   last_error text, updated_at timestamptz not null, updated_by text not null, primary key (tenant_id, connection_id)
 );
+` }, { id: '002_session_rotation', sql: `
+alter table {s}.sessions add column if not exists previous_refresh_hash text;
+alter table {s}.sessions add column if not exists rotated_at timestamptz;
+alter table {s}.sessions add column if not exists rotations int not null default 0;
 ` }];
 
 export const ENGINES = ['orchestration', 'identity', 'intake', 'correspondence', 'discovery', 'evidence', 'processing', 'knowledge', 'investigation', 'editorial', 'production', 'consent', 'release', 'resources', 'workspace'] as const;

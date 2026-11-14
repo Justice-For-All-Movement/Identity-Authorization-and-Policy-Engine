@@ -31,6 +31,7 @@ export function routes(engine: IdentityEngine): Route[] {
     }),
     pub('POST', '/v1/sessions', (r) => engine.login(body(r))),
     pub('POST', '/v1/sessions/directory', (r) => engine.sessionDirectory(body(r).refreshToken)),
+    pub('POST', '/v1/sessions/refresh', (r) => engine.rotateSession(body(r).refreshToken)),
     pub('POST', '/v1/sessions/logout', async (r) => { await engine.logout(body(r).refreshToken); return { ok: true }; }),
     pub('POST', '/v1/tokens', (r) => engine.issueAccessToken(body(r))),
     pub('POST', '/v1/tokens/service', (r) => engine.authenticateService(body(r))),

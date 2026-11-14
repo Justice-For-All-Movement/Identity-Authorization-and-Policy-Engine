@@ -482,6 +482,7 @@ export function createEngine(deps: EngineDeps) {
     if (row.failures >= lock.max) await sql.query(`update ${S}.auth_attempts set locked_until=$2 where key=$1`, [key, new Date(at.getTime() + Math.min(lock.cap, lock.base * 2 ** Math.min(row.failures - lock.max, 10)) * 1000).toISOString()]);
     throw denied();
   }
+  const REUSE_GRACE_MS = 10_000;
   async function createSession(q: Sql, actorId: string, method: string, boundTenantId: string | null): Promise<SessionInfo> {
     const id = randomUUID(), secret = randomToken(32), at = clock();
     const expires = new Date(at.getTime() + ttl.session * 1000).toISOString();
@@ -508,6 +509,14 @@ export function createEngine(deps: EngineDeps) {
     const id = refreshToken.slice(0, Math.max(dot, 0)), secret = refreshToken.slice(dot + 1);
     const at = clock();
     const row = (await sql.query<R>(`select s.*, a.status as actor_status from ${S}.sessions s join ${S}.actors a on a.id=s.actor_id where s.id=$1`, [id]))[0];
+    // Reuse detection: a refresh token that was already rotated away means a copy is in someone else's hands. Outside a
+    // short grace window (two tabs refreshing at once) the whole session is ended, for the legitimate holder too.
+    if (row !== undefined && row.previous_refresh_hash !== null && row.revoked_at === null && sameHash(sha256(secret), row.previous_refresh_hash)) {
+      if (row.rotated_at !== null && new Date(row.rotated_at).getTime() + REUSE_GRACE_MS > at.getTime()) throw denied('Session is invalid or has ended');
+      await sql.query(`update ${S}.sessions set revoked_at=$2, revoked_by=$3, revoke_reason='refresh_token_reuse' where id=$1 and revoked_at is null`, [id, at.toISOString(), row.actor_id]);
+      k.clearRevocationCache();
+      throw denied('Session is invalid or has ended');
+    }
     if (row === undefined || !sameHash(sha256(secret), row.refresh_hash) || row.revoked_at !== null || row.actor_status !== 'active'
       || new Date(row.expires_at).getTime() <= at.getTime() || new Date(row.last_used_at).getTime() + ttl.idle * 1000 <= at.getTime()) throw denied('Session is invalid or has ended');
     await sql.query(`update ${S}.sessions set last_used_at=$2 where id=$1`, [id, at.toISOString()]);
@@ -523,6 +532,17 @@ export function createEngine(deps: EngineDeps) {
     const s = await loadSession(input?.refreshToken);
     if (s.bound_tenant_id !== null && s.bound_tenant_id !== input.tenantId) throw new DomainError('forbidden', 'No active access to this organization and project');
     return k.mint({ actorId: s.actor_id, tenantId: input.tenantId, projectId: input.projectId, purpose: input.purpose, ttlSeconds: input.ttlSeconds ?? ttl.access, kind: 'human', sessionId: s.id, ...(input.capabilities === undefined ? {} : { requested: validCaps(input.capabilities) }) });
+  }
+  /**
+   * Rotates the refresh token: returns a new one for the same session and invalidates the presented one. Presenting a
+   * rotated-away token again later ends the session (reuse detection). Clients that never call this keep working as before.
+   */
+  async function rotateSession(refreshToken: string): Promise<SessionInfo> {
+    const s = await loadSession(refreshToken);
+    const secret = randomToken(32), at = clock();
+    const updated = await sql.query<R>(`update ${S}.sessions set previous_refresh_hash=refresh_hash, refresh_hash=$3, rotated_at=$4, rotations=rotations+1 where id=$1 and refresh_hash=$2 and revoked_at is null returning id`, [s.id, s.refresh_hash, sha256(secret), at.toISOString()]);
+    if (updated.length === 0) throw denied('Session is invalid or has ended');
+    return { sessionId: s.id, refreshToken: `${s.id}.${secret}`, actorId: s.actor_id, expiresAt: iso(s.expires_at), boundTenantId: s.bound_tenant_id ?? null };
   }
   async function logout(refreshToken: string): Promise<void> {
     const s = await loadSession(refreshToken);
@@ -914,7 +934,7 @@ export function createEngine(deps: EngineDeps) {
   const engine = {
     manifest,
     // host / unauthenticated entry points
-    bootstrapFirstAdministrator, isBootstrapped, login, logout, sessionDirectory, issueAccessToken, authenticateService,
+    bootstrapFirstAdministrator, isBootstrapped, login, logout, rotateSession, sessionDirectory, issueAccessToken, authenticateService,
     publicKeys: k.loadPublicKeys, jwks, verifier: k.verifier as () => TokenVerifier, isRevoked: k.isRevoked as (claims: TokenClaims | IdentityClaims) => Promise<boolean>,
     host: {
       /** Trusted in-process callers only (never exposed over HTTP). */

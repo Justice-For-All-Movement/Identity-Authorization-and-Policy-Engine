@@ -149,6 +149,7 @@ login(input: { login: string; password: string }): Promise<SessionInfo>
 sessionDirectory(refreshToken: string): Promise<{ actorId; sessionId; expiresAt; organizations: { organization: { id; name; branding; defaultLocale }; purposes: string[]; projects: { id; name; kind; roles: string[] }[] }[] }>
 issueAccessToken(input: { refreshToken; tenantId; projectId; purpose; capabilities?: string[]; ttlSeconds? }): Promise<IssuedToken>
 logout(refreshToken: string): Promise<void>
+rotateSession(refreshToken: string): Promise<SessionInfo>   // new refresh token for the same session; the presented one is retired
 authenticateService(input: { serviceId; secret; projectId; purpose; capabilities?: string[]; ttlSeconds? }): Promise<IssuedToken>
 startOidcLogin(input: { tenantId; providerId; redirectUri }): Promise<{ authorizationUrl; state; expiresAt }>
 completeOidcLogin(input: { state; code }): Promise<SessionInfo>
@@ -324,7 +325,7 @@ Standard: `GET /healthz`, `GET /v1/manifest` (public), `GET /v1/inspect?ref=`, `
 `GET /v1/events`, `POST /v1/upstream-changes`.
 
 Public (no bearer token): `GET /v1/keys` · `GET|POST /v1/bootstrap` · `POST /v1/sessions` (login) ·
-`POST /v1/sessions/directory` · `POST /v1/sessions/logout` · `POST /v1/tokens` · `POST /v1/tokens/service` ·
+`POST /v1/sessions/directory` · `POST /v1/sessions/refresh` · `POST /v1/sessions/logout` · `POST /v1/tokens` · `POST /v1/tokens/service` ·
 `POST /v1/oidc/start` · `POST /v1/oidc/callback`.
 
 Catalog API: `POST /v1/policy/evaluate` (`authorize`) · `POST /v1/capability-grants` · `POST /v1/grants/:id/revoke` ·
@@ -400,7 +401,10 @@ adapter, kit) are unchanged and still run.
 
 - No live identity provider, intake deployment or hosted environment was used. No independent security review.
 - No MFA, WebAuthn, password-reset-by-email, account self-registration or invitation emails (this engine sends nothing).
-- Refresh tokens are not rotated on use; a stolen refresh token works until the session expires, idles out or is revoked.
+- Refresh-token rotation is opt-in per client (`rotateSession` / `POST /v1/sessions/refresh`): the old token is retired, and
+  presenting a retired token more than 10 s after its rotation ends the whole session (reuse detection; audited as
+  `revoke_reason = refresh_token_reuse`). Rotation does not extend the absolute session lifetime. A client that never
+  rotates keeps the earlier behaviour, where a stolen refresh token works until the session expires, idles out or is revoked.
 - Login lockout is per login name, so a third party can lock an account for the lock period (30 s doubling to 15 min).
   There is no per-network-address throttle: the kit's HTTP layer does not expose the peer address.
 - Revocation reaches other engines only through `isRevoked` / `authorize` calls or token expiry (see §2).
