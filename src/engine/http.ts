@@ -37,6 +37,12 @@ export function routes(engine: IdentityEngine): Route[] {
     pub('POST', '/v1/tokens/service', (r) => engine.authenticateService(body(r))),
     pub('POST', '/v1/oidc/start', (r) => engine.startOidcLogin(body(r))),
     pub('POST', '/v1/oidc/callback', (r) => engine.completeOidcLogin(body(r))),
+    // ── second factor ──
+    route('GET', '/v1/mfa', (r) => engine.mfaStatus(r.ctx)),
+    route('POST', '/v1/mfa/enroll', (r) => engine.beginMfaEnrollment(r.ctx)),
+    route('POST', '/v1/mfa/confirm', (r) => engine.confirmMfaEnrollment(r.ctx, body(r))),
+    route('POST', '/v1/mfa/disable', (r) => engine.disableMfa(r.ctx, body(r))),
+    route('POST', '/v1/actors/:id/mfa/reset', (r) => engine.resetMfa(r.ctx, r.params.id as string)),
     // ── decisions ──
     route('POST', '/v1/policy/evaluate', (r) => engine.authorize(r.ctx, body(r))),
     route('GET', '/v1/access/explain', (r) => engine.explain(r.ctx, q(r, 'actorId') ?? r.ctx.actor.id, q(r, 'capability') ?? '', q(r, 'resource'), opt({ purpose: q(r, 'purpose'), projectId: q(r, 'projectId'), compartment: q(r, 'compartment') }))),

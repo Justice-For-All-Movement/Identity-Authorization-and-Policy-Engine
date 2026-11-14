@@ -105,6 +105,11 @@ create table {s}.intake_connections (
 alter table {s}.sessions add column if not exists previous_refresh_hash text;
 alter table {s}.sessions add column if not exists rotated_at timestamptz;
 alter table {s}.sessions add column if not exists rotations int not null default 0;
+` }, { id: '003_mfa', sql: `
+create table if not exists {s}.mfa (
+  actor_id text primary key, secret_sealed text not null, confirmed_at timestamptz, last_step bigint not null default 0,
+  recovery_hashes text[] not null default '{}', created_at timestamptz not null, updated_at timestamptz not null
+);
 ` }];
 
 export const ENGINES = ['orchestration', 'identity', 'intake', 'correspondence', 'discovery', 'evidence', 'processing', 'knowledge', 'investigation', 'editorial', 'production', 'consent', 'release', 'resources', 'workspace'] as const;

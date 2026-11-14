@@ -1,4 +1,5 @@
 // E01 Identity, Authorization and Policy — service layer entry point.
+import { newRecoveryCodes, newSecret, otpauthUri, recoveryHash, verifyTotp } from './mfa.ts';
 import { randomUUID } from 'node:crypto';
 import { DomainError, invariant } from '../contracts.ts';
 import type { Context, Json } from '../contracts.ts';
@@ -490,18 +491,103 @@ export function createEngine(deps: EngineDeps) {
     return { sessionId: id, refreshToken: `${id}.${secret}`, actorId, expiresAt: expires, boundTenantId };
   }
   /** Local password sign-in. Returns a session whose refresh token is exchanged for short-lived access tokens. */
-  async function login(input: { login: string; password: string }): Promise<SessionInfo> {
+  async function login(input: { login: string; password: string; code?: string; recoveryCode?: string }): Promise<SessionInfo> {
     invariant(input !== null && typeof input === 'object' && typeof input.login === 'string' && typeof input.password === 'string' && input.login.length <= 254 && input.password.length <= 256, 'invalid_input', 'Login and password are required');
     const name = input.login.trim().toLowerCase();
-    let actorId = '';
+    let actorId = ''; let mfaMissing = false;
     await throttle(`login:${name}`, async () => {
       const cred = (await sql.query<R>(`select c.actor_id, c.password_hash, a.status from ${S}.credentials c join ${S}.actors a on a.id=c.actor_id where c.login=$1`, [name]))[0];
       if (cred === undefined) { dummyHash ??= hashPassword(randomToken(), cfg.scryptN); await verifyPassword(input.password, await dummyHash); return false; }
       const ok = await verifyPassword(input.password, cred.password_hash);
       actorId = cred.actor_id;
-      return ok && cred.status === 'active';
+      if (!(ok && cred.status === 'active')) return false;
+      // Second factor, asked for only after the password is right (nothing is revealed to someone without it).
+      const m = (await sql.query<R>(`select * from ${S}.mfa where actor_id=$1 and confirmed_at is not null`, [actorId]))[0];
+      if (m === undefined) return true;
+      if (input.code === undefined && input.recoveryCode === undefined) { mfaMissing = true; return true; }
+      return secondFactor(m, input);
     });
+    if (mfaMissing) throw new DomainError('invalid_mfa_required', 'Enter the one-time code from your authenticator app, or a recovery code');
     return createSession(sql, actorId, 'password', null);
+  }
+  // ── second factor (TOTP + recovery codes) ──
+  /** Checks a one-time or recovery code for a confirmed enrolment and consumes it (a code works once). */
+  async function secondFactor(m: R, input: { code?: string; recoveryCode?: string }): Promise<boolean> {
+    if (typeof input.recoveryCode === 'string' && input.recoveryCode.length <= 40) {
+      const h = recoveryHash(input.recoveryCode);
+      const used = await sql.query<R>(`update ${S}.mfa set recovery_hashes = array_remove(recovery_hashes, $2), updated_at=$3 where actor_id=$1 and $2 = any(recovery_hashes) returning actor_id`, [m.actor_id, h, clock().toISOString()]);
+      return used.length === 1;
+    }
+    if (typeof input.code !== 'string') return false;
+    const secret = k.requireSealer().open(m.secret_sealed, `mfa:${m.actor_id}`);
+    const step = verifyTotp(secret, input.code.trim(), clock(), Number(m.last_step));
+    if (step === null) return false;
+    // Compare-and-set on the last step: a code replayed concurrently is accepted at most once.
+    const won = await sql.query<R>(`update ${S}.mfa set last_step=$2, updated_at=$3 where actor_id=$1 and last_step < $2 returning actor_id`, [m.actor_id, step, clock().toISOString()]);
+    return won.length === 1;
+  }
+  const selfHuman = (ctx: ServiceContext): string => {
+    if (ctx.actor.kind !== 'human') throw new DomainError('forbidden', 'Two-factor sign-in is managed by the person whose account it is');
+    return ctx.actor.id;
+  };
+  /** Starts (or restarts) enrolment: returns the secret once, for an authenticator app. Not active until confirmed. */
+  async function beginMfaEnrollment(ctx: ServiceContext): Promise<{ secret: string; otpauthUri: string }> {
+    const actorId = selfHuman(ctx);
+    const current = (await sql.query<R>(`select confirmed_at from ${S}.mfa where actor_id=$1`, [actorId]))[0];
+    if (current !== undefined && current.confirmed_at !== null) throw new DomainError('invalid_state', 'Two-factor sign-in is already enabled; disable it first to enrol a new device');
+    const secret = newSecret(), at = clock().toISOString();
+    const login = (await sql.query<R>(`select login from ${S}.credentials where actor_id=$1`, [actorId]))[0]?.login ?? actorId;
+    await sql.query(`insert into ${S}.mfa (actor_id, secret_sealed, created_at, updated_at) values ($1,$2,$3,$3) on conflict (actor_id) do update set secret_sealed=excluded.secret_sealed, last_step=0, recovery_hashes='{}', updated_at=excluded.updated_at where ${S}.mfa.confirmed_at is null`,
+      [actorId, k.requireSealer().seal(secret, `mfa:${actorId}`), at]);
+    return { secret, otpauthUri: otpauthUri(k.issuer, String(login), secret) };
+  }
+  /** Confirms enrolment with a current code; returns ten single-use recovery codes, shown once. */
+  async function confirmMfaEnrollment(ctx: ServiceContext, input: { code: string }): Promise<{ enabled: true; recoveryCodes: string[] }> {
+    const actorId = selfHuman(ctx);
+    const m = (await sql.query<R>(`select * from ${S}.mfa where actor_id=$1`, [actorId]))[0];
+    if (m === undefined || m.confirmed_at !== null) throw new DomainError('invalid_state', 'There is no pending enrolment');
+    let ok = false;
+    await throttle(`mfa:${actorId}`, async () => (ok = await secondFactor(m, { code: String(input?.code ?? '') })));
+    if (!ok) throw new DomainError('unauthenticated', 'The code is not valid');
+    const codes = newRecoveryCodes();
+    await sql.tx(async (tx) => {
+      await tx.query(`update ${S}.mfa set confirmed_at=$2, recovery_hashes=$3, updated_at=$2 where actor_id=$1`, [actorId, clock().toISOString(), codes.map(recoveryHash)]);
+      await record(tx, ctx, 'mfa.enabled', ref('actor', actorId), {}, 'actor.updated');
+    });
+    return { enabled: true, recoveryCodes: codes };
+  }
+  async function mfaStatus(ctx: ServiceContext): Promise<{ enabled: boolean; pending: boolean; recoveryCodesLeft: number }> {
+    const actorId = selfHuman(ctx);
+    const m = (await sql.query<R>(`select confirmed_at, cardinality(recovery_hashes) as left from ${S}.mfa where actor_id=$1`, [actorId]))[0];
+    return { enabled: m?.confirmed_at != null, pending: m !== undefined && m.confirmed_at === null, recoveryCodesLeft: Number(m?.left ?? 0) };
+  }
+  /** The account holder turns two-factor sign-in off with a current code or a recovery code. */
+  async function disableMfa(ctx: ServiceContext, input: { code?: string; recoveryCode?: string }): Promise<{ enabled: false }> {
+    const actorId = selfHuman(ctx);
+    const m = (await sql.query<R>(`select * from ${S}.mfa where actor_id=$1`, [actorId]))[0];
+    if (m === undefined) return { enabled: false };
+    if (m.confirmed_at !== null) {
+      let ok = false;
+      await throttle(`mfa:${actorId}`, async () => (ok = await secondFactor(m, input ?? {})));
+      if (!ok) throw new DomainError('unauthenticated', 'The code is not valid');
+    }
+    await sql.tx(async (tx) => {
+      await tx.query(`delete from ${S}.mfa where actor_id=$1`, [actorId]);
+      await record(tx, ctx, 'mfa.disabled', ref('actor', actorId), { by: 'holder' }, 'actor.updated');
+    });
+    return { enabled: false };
+  }
+  /** An administrator removes a lost device's enrolment for a member of their organization (audited). */
+  async function resetMfa(ctx: ServiceContext, actorId: string): Promise<{ enabled: false }> {
+    need(ctx, 'identity:admin');
+    const target = validId(actorId, 'actorId');
+    const member = (await sql.query<R>(`select 1 from ${S}.memberships where tenant_id=$1 and actor_id=$2 limit 1`, [ctx.tenantId, target]))[0];
+    if (member === undefined) throw new DomainError('not_found', 'Not found');
+    await sql.tx(async (tx) => {
+      await tx.query(`delete from ${S}.mfa where actor_id=$1`, [target]);
+      await record(tx, ctx, 'mfa.reset', ref('actor', target), { by: ctx.actor.id }, 'actor.updated');
+    });
+    return { enabled: false };
   }
   async function loadSession(refreshToken: unknown): Promise<R> {
     if (typeof refreshToken !== 'string' || refreshToken.length > 200) throw denied();
@@ -934,7 +1020,7 @@ export function createEngine(deps: EngineDeps) {
   const engine = {
     manifest,
     // host / unauthenticated entry points
-    bootstrapFirstAdministrator, isBootstrapped, login, logout, rotateSession, sessionDirectory, issueAccessToken, authenticateService,
+    bootstrapFirstAdministrator, isBootstrapped, login, logout, rotateSession, beginMfaEnrollment, confirmMfaEnrollment, mfaStatus, disableMfa, resetMfa, sessionDirectory, issueAccessToken, authenticateService,
     publicKeys: k.loadPublicKeys, jwks, verifier: k.verifier as () => TokenVerifier, isRevoked: k.isRevoked as (claims: TokenClaims | IdentityClaims) => Promise<boolean>,
     host: {
       /** Trusted in-process callers only (never exposed over HTTP). */
