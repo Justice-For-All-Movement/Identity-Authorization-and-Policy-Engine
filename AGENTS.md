@@ -18,3 +18,6 @@ verification records remain as history. Active work follows
 `tests/engine*.test.ts` on real PostgreSQL (`TEST_DATABASE_URL`). `src/service-kit.ts` and `src/contracts.ts` are the
 kit's source of truth for every engine: change them only through the integrator. Work is committed on
 `feature/pam-completion`; do not open pull requests or push to `main` from this assignment. Keep `npm run check` green.
+
+Status (2026-11-17): every unit in `registry/prs.json` is implemented. IAP-004, IAP-007 and IAP-008 are complete pending
+the owner's credentials; the exact steps are in `docs/OWNER_STEPS.md`.

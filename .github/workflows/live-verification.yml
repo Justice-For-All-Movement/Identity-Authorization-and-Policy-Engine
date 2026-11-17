@@ -1,0 +1,35 @@
+name: Live verification
+# Opt-in acceptance of a running deployment and of an OpenID Connect provider. Never runs on pull requests, so it
+# never gates a merge. Each step prints a skip notice and succeeds when its settings are absent.
+# Settings (names only; values live in the repository's Actions variables and secrets):
+#   variables: IDENTITY_LIVE_BASE_URL, IDENTITY_LIVE_EXPECT_ISSUER, IDENTITY_LIVE_TENANT_ID, IDENTITY_LIVE_PROJECT_ID, IDENTITY_LIVE_OIDC_ISSUER
+#   secrets:   IDENTITY_LIVE_LOGIN, IDENTITY_LIVE_PASSWORD, IDENTITY_LIVE_TOTP_SECRET
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Deployment acceptance
+        run: node scripts/live-verify.mjs
+        env:
+          IDENTITY_LIVE_BASE_URL: ${{ vars.IDENTITY_LIVE_BASE_URL }}
+          IDENTITY_LIVE_EXPECT_ISSUER: ${{ vars.IDENTITY_LIVE_EXPECT_ISSUER }}
+          IDENTITY_LIVE_TENANT_ID: ${{ vars.IDENTITY_LIVE_TENANT_ID }}
+          IDENTITY_LIVE_PROJECT_ID: ${{ vars.IDENTITY_LIVE_PROJECT_ID }}
+          IDENTITY_LIVE_LOGIN: ${{ secrets.IDENTITY_LIVE_LOGIN }}
+          IDENTITY_LIVE_PASSWORD: ${{ secrets.IDENTITY_LIVE_PASSWORD }}
+          IDENTITY_LIVE_TOTP_SECRET: ${{ secrets.IDENTITY_LIVE_TOTP_SECRET }}
+      - name: Identity provider compatibility
+        run: node scripts/oidc-provider-check.mjs
+        env:
+          IDENTITY_LIVE_OIDC_ISSUER: ${{ vars.IDENTITY_LIVE_OIDC_ISSUER }}

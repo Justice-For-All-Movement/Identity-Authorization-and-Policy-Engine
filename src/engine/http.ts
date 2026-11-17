@@ -47,6 +47,19 @@ export function routes(engine: IdentityEngine): Route[] {
     route('POST', '/v1/policy/evaluate', (r) => engine.authorize(r.ctx, body(r))),
     route('GET', '/v1/access/explain', (r) => engine.explain(r.ctx, q(r, 'actorId') ?? r.ctx.actor.id, q(r, 'capability') ?? '', q(r, 'resource'), opt({ purpose: q(r, 'purpose'), projectId: q(r, 'projectId'), compartment: q(r, 'compartment') }))),
     route('GET', '/v1/whoami', (r) => engine.whoami(r.ctx)),
+    route('GET', '/v1/access/who', (r) => engine.whoCanAccess(r.ctx, { capability: q(r, 'capability') ?? '', ...opt({ resource: q(r, 'resource'), purpose: q(r, 'purpose'), projectId: q(r, 'projectId'), compartment: q(r, 'compartment'), limit: q(r, 'limit') === undefined ? undefined : Number(q(r, 'limit')) }) })),
+    route('GET', '/v1/access/revocation-impact', (r) => engine.revocationImpact(r.ctx, opt({ actorId: q(r, 'actorId'), role: q(r, 'role'), grantId: q(r, 'grantId') }))),
+    route('POST', '/v1/projections/redact', (r) => engine.redact(r.ctx, body(r))),
+    // ── rate limits ──
+    route('POST', '/v1/rate-limits/consume', (r) => engine.consumeRateLimit(r.ctx, body(r))),
+    route('GET', '/v1/rate-limits', (r) => engine.rateLimitStatus(r.ctx, { key: q(r, 'key') ?? '', ...opt({ subject: q(r, 'subject') }) })),
+    // ── invitations and account recovery ──
+    route('GET', '/v1/invitations', (r) => engine.listInvitations(r.ctx, opt({ includeClosed: q(r, 'includeClosed') === 'true' ? true : undefined }))),
+    route('POST', '/v1/invitations', (r) => engine.createInvitation(r.ctx, body(r))),
+    route('POST', '/v1/invitations/:id/revoke', (r) => engine.revokeInvitation(r.ctx, r.params.id as string)),
+    pub('POST', '/v1/invitations/accept', (r) => engine.acceptInvitation(body(r))),
+    pub('POST', '/v1/password-resets', (r) => engine.requestPasswordReset(body(r))),
+    pub('POST', '/v1/password-resets/complete', (r) => engine.completePasswordReset(body(r))),
     // ── grants ──
     route('POST', '/v1/capability-grants', (r) => engine.createGrant(r.ctx, body(r))),
     route('GET', '/v1/capability-grants', (r) => engine.listGrants(r.ctx, opt({ actorId: q(r, 'actorId'), capability: q(r, 'capability'), projectId: q(r, 'projectId'), includeInactive: q(r, 'includeInactive') === 'true' ? true : undefined }))),
