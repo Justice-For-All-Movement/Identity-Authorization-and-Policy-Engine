@@ -11,14 +11,17 @@ import { EXACT_CAP, ID, covers, denied, futureTime, isSensitive, iso, isoOrNull,
 import type { AccessDecision, ActorKind, EngineDeps, IdentityClaims, IssuedToken, R, SessionInfo } from './core.ts';
 import { createKernel } from './kernel.ts';
 import { createFederation } from './federation.ts';
+import { createGovernance } from './governance.ts';
 
 export { SCHEMA, migrations, DEFAULT_ROLES, DEFAULT_PURPOSES, ORG_WIDE } from './schema.ts';
-export type { AccessDecision, DecisionStep, EngineConfig, EngineDeps, EnginePorts, IdentityClaims, IssuedToken, SessionInfo } from './core.ts';
+export type { AccessDecision, DecisionStep, EngineConfig, EngineDeps, EnginePorts, IdentityClaims, IssuedToken, PasswordResetMessage, SessionInfo } from './core.ts';
+export type { AccessHolder, InvitationInfo, RateLimitState } from './governance.ts';
+export { SECRET_TABLES, TENANT_SETTING, TENANT_TABLES } from './schema.ts';
 export { routes } from './http.ts';
 
 const S = SCHEMA;
 export const manifest: EngineManifestV1 = {
-  id: 'E01', name: 'Identity, Authorization and Policy', version: '1.0.0', kit: SERVICE_KIT_VERSION,
+  id: 'E01', name: 'Identity, Authorization and Policy', version: '1.1.0', kit: SERVICE_KIT_VERSION,
   capabilities: ['identity:read', 'identity:audit', 'identity:admin', 'identity:grant', 'identity:issue_token', 'identity:export', 'identity:events'],
   emits: ['organization.created', 'organization.updated', 'project.created', 'project.updated', 'actor.created', 'actor.updated', 'membership.changed', 'role.changed', 'purpose.changed', 'compartment.changed', 'policy.changed', 'grant.issued', 'grant.revoked', 'grant.used', 'token.revoked', 'session.revoked', 'actor.revoked', 'actor.reinstated', 'key.rotated', 'disclosure.denied', 'mapping.changed', 'federation.changed'],
   consumes: [],
@@ -40,6 +43,13 @@ const toProject = (r: R): Project => ({ id: r.id, tenantId: r.tenant_id, name: r
 const toActor = (r: R): ActorInfo => ({ id: r.id, kind: r.kind, displayName: r.display_name, description: r.description, status: r.status, homeTenantId: r.home_tenant_id, homeProjectId: r.home_project_id ?? null, login: r.login ?? null, profile: r.profile, createdAt: iso(r.created_at) });
 const toRole = (r: R): RoleInfo => ({ name: r.name, description: r.description, capabilities: r.capabilities, actorKinds: r.actor_kinds, version: r.version, seeded: r.seeded, updatedAt: iso(r.updated_at) });
 const toSession = (r: R): SessionRecord => ({ id: r.id, actorId: r.actor_id, method: r.method, boundTenantId: r.bound_tenant_id ?? null, createdAt: iso(r.created_at), lastUsedAt: iso(r.last_used_at), expiresAt: iso(r.expires_at), revokedAt: isoOrNull(r.revoked_at) });
+/** Opaque organization policy JSON; the keys this engine interprets are type-checked. */
+function policyConfigObject(value: unknown): { [key: string]: Json } {
+  const out = jsonObject(value, 'policyConfig');
+  invariant(out.requireMfa === undefined || typeof out.requireMfa === 'boolean', 'invalid_input', 'policyConfig.requireMfa must be true or false');
+  invariant(out.agentGrantableActions === undefined || (Array.isArray(out.agentGrantableActions) && out.agentGrantableActions.every((a) => typeof a === 'string')), 'invalid_input', 'policyConfig.agentGrantableActions must be a list of action names');
+  return out;
+}
 const like = (q: string): string => `%${q.replace(/[\\%_]/g, '\\$&')}%`;
 const LOGIN = /^[a-z0-9][a-z0-9._@+-]{2,253}$/;
 const ACTOR_COLS = `a.*, (select login from ${S}.credentials c where c.actor_id = a.id) as login`;
@@ -48,6 +58,8 @@ export function createEngine(deps: EngineDeps) {
   const k = createKernel(deps);
   const { sql, cfg, clock, ref, record, bump } = k;
   const fed = createFederation(k, deps.ports ?? {}, { needNow, requireOwner, memberActor, issuerGate, createSession: (actorId: string, method: string, boundTenantId: string | null) => createSession(sql, actorId, method, boundTenantId), createNonHuman });
+  const gov = createGovernance(k, deps.ports ?? {}, { needNow, requireOwner, projectScope, createHumanTx, createSession, loadSession, secondFactor,
+    isAdmin: (ctx) => isAdmin(ctx), authorize: (ctx, request) => authorize(ctx, request), password: (v) => password(v), loginName: (v) => loginName(v), privilegedRole: (c) => privilegedRole(c) });
   const ttl = { access: cfg.accessTokenTtlSeconds ?? 600, service: cfg.serviceTokenTtlSeconds ?? 900, agentMax: cfg.agentTokenMaxTtlSeconds ?? 900, session: cfg.sessionTtlSeconds ?? 43200, idle: cfg.sessionIdleSeconds ?? 7200 };
   const lock = { max: cfg.lockout?.maxFailures ?? 5, base: cfg.lockout?.baseLockSeconds ?? 30, cap: cfg.lockout?.maxLockSeconds ?? 900, window: cfg.lockout?.windowSeconds ?? 900 };
   const minPassword = cfg.passwordMinLength ?? 12;
@@ -100,7 +112,7 @@ export function createEngine(deps: EngineDeps) {
     const ctx: Context = { ...by, tenantId: orgId, projectId };
     const languages = input.languages === undefined ? [] : input.languages.map((l) => text(l, 'language', 35));
     const inserted = await tx.query<R>(`insert into ${S}.organizations (id, name, branding, default_locale, languages, jurisdiction, policy_config, created_at, updated_at, created_by) values ($1,$2,$3::jsonb,$4,$5,$6::jsonb,$7::jsonb,$8,$8,$9) on conflict do nothing returning *, policy_version::text as pv`,
-      [orgId, name, JSON.stringify(jsonObject(input.branding, 'branding')), text(input.defaultLocale ?? 'en', 'defaultLocale', 35), languages, JSON.stringify(jsonObject(input.jurisdiction, 'jurisdiction')), JSON.stringify(jsonObject(input.policyConfig, 'policyConfig')), by.now, by.actor.id]);
+      [orgId, name, JSON.stringify(jsonObject(input.branding, 'branding')), text(input.defaultLocale ?? 'en', 'defaultLocale', 35), languages, JSON.stringify(jsonObject(input.jurisdiction, 'jurisdiction')), JSON.stringify(policyConfigObject(input.policyConfig)), by.now, by.actor.id]);
     invariant(inserted[0] !== undefined, 'conflict', 'Organization id is already in use');
     for (const role of DEFAULT_ROLES) {
       await tx.query(`insert into ${S}.roles (tenant_id, name, description, capabilities, actor_kinds, seeded, updated_at, updated_by) values ($1,$2,$3,$4,$5,true,$6,$7)`, [orgId, role.name, role.description, [...new Set(role.capabilities)].sort(), [...role.kinds], by.now, by.actor.id]);
@@ -169,7 +181,7 @@ export function createEngine(deps: EngineDeps) {
       if (patch.policyConfig !== undefined) await requireOwner(tx, ctx, 'change policy configuration');
       await tx.query(`update ${S}.organizations set name=$2, branding=$3::jsonb, default_locale=$4, languages=$5, jurisdiction=$6::jsonb, policy_config=$7::jsonb, updated_at=$8 where id=$1`,
         [ctx.tenantId, patch.name === undefined ? cur.name : text(patch.name, 'name'), JSON.stringify(patch.branding === undefined ? cur.branding : jsonObject(patch.branding, 'branding')), patch.defaultLocale === undefined ? cur.default_locale : text(patch.defaultLocale, 'defaultLocale', 35),
-          patch.languages === undefined ? cur.languages : patch.languages.map((l) => text(l, 'language', 35)), JSON.stringify(patch.jurisdiction === undefined ? cur.jurisdiction : jsonObject(patch.jurisdiction, 'jurisdiction')), JSON.stringify(patch.policyConfig === undefined ? cur.policy_config : jsonObject(patch.policyConfig, 'policyConfig')), ctx.now]);
+          patch.languages === undefined ? cur.languages : patch.languages.map((l) => text(l, 'language', 35)), JSON.stringify(patch.jurisdiction === undefined ? cur.jurisdiction : jsonObject(patch.jurisdiction, 'jurisdiction')), JSON.stringify(patch.policyConfig === undefined ? cur.policy_config : policyConfigObject(patch.policyConfig)), ctx.now]);
       await record(tx, ctx, 'organization.updated', ref('organization', ctx.tenantId), { fields: Object.keys(patch) }, 'organization.updated');
       if (patch.policyConfig !== undefined) await bump(tx, ctx, 'policy configuration changed');
       return toOrg((await tx.query<R>(`select *, policy_version::text as pv from ${S}.organizations where id=$1`, [ctx.tenantId]))[0] as R);
@@ -617,7 +629,16 @@ export function createEngine(deps: EngineDeps) {
   async function issueAccessToken(input: { refreshToken: string; tenantId: string; projectId: string; purpose: string; capabilities?: readonly string[]; ttlSeconds?: number }): Promise<IssuedToken> {
     const s = await loadSession(input?.refreshToken);
     if (s.bound_tenant_id !== null && s.bound_tenant_id !== input.tenantId) throw new DomainError('forbidden', 'No active access to this organization and project');
-    return k.mint({ actorId: s.actor_id, tenantId: input.tenantId, projectId: input.projectId, purpose: input.purpose, ttlSeconds: input.ttlSeconds ?? ttl.access, kind: 'human', sessionId: s.id, ...(input.capabilities === undefined ? {} : { requested: validCaps(input.capabilities) }) });
+    // An organization may require two-factor sign-in (`policyConfig.requireMfa: true`) for local password sessions.
+    // Until the holder enrols, tokens carry no capabilities: enough to enrol (the MFA routes need only a signed-in
+    // person), nothing else. Federated sessions rely on the identity provider's own authentication policy.
+    let restricted = false;
+    if (s.method === 'password') {
+      const row = (await sql.query<R>(`select (o.policy_config->>'requireMfa') = 'true' as required, exists(select 1 from ${S}.mfa m where m.actor_id=$2 and m.confirmed_at is not null) as enrolled from ${S}.organizations o where o.id=$1`, [input.tenantId, s.actor_id]))[0];
+      restricted = row !== undefined && row.required === true && row.enrolled !== true;
+    }
+    const out = await k.mint({ actorId: s.actor_id, tenantId: input.tenantId, projectId: input.projectId, purpose: input.purpose, ttlSeconds: input.ttlSeconds ?? ttl.access, kind: 'human', sessionId: s.id, ...(restricted ? { requested: [] } : input.capabilities === undefined ? {} : { requested: validCaps(input.capabilities) }) });
+    return restricted ? { ...out, restriction: 'mfa_enrollment_required' } : out;
   }
   /**
    * Rotates the refresh token: returns a new one for the same session and invalidates the presented one. Presenting a
@@ -998,6 +1019,7 @@ export function createEngine(deps: EngineDeps) {
     await sql.query(`delete from ${S}.oidc_states where expires_at < $1`, [at]);
     await sql.query(`delete from ${S}.token_revocations where token_expires_at < $1`, [at]);
     await sql.query(`delete from ${S}.auth_attempts where last_failed_at < $1 and (locked_until is null or locked_until < $2)`, [new Date(clock().getTime() - lock.window * 1000).toISOString(), at]);
+    await gov.sweep();
     if (options.rotateKeysOlderThanSeconds !== undefined && k.sealer !== null) {
       const old = await sql.query(`select 1 from ${S}.signing_keys where status='active' and created_at < $1`, [new Date(clock().getTime() - options.rotateKeysOlderThanSeconds * 1000).toISOString()]);
       if (old.length > 0) return { rotated: (await k.rotateSigningKey()).kid };
@@ -1038,6 +1060,10 @@ export function createEngine(deps: EngineDeps) {
     // tokens, grants, revocation, decisions
     issueServiceToken, issueAgentToken, createGrant, revokeGrant, listGrants, checkGrant, useGrant,
     revokeToken, listSessions, revokeSession, revokeActor, reinstateActor, authorize, explain, counts, exportDirectory,
+    // governance views, rate limits, invitations, account recovery
+    whoCanAccess: gov.whoCanAccess, revocationImpact: gov.revocationImpact, redact: gov.redact, consumeRateLimit: gov.consumeRateLimit, rateLimitStatus: gov.rateLimitStatus,
+    createInvitation: gov.createInvitation, listInvitations: gov.listInvitations, revokeInvitation: gov.revokeInvitation, acceptInvitation: gov.acceptInvitation,
+    requestPasswordReset: gov.requestPasswordReset, completePasswordReset: gov.completePasswordReset,
     // federation
     ...fed,
     // standard surface

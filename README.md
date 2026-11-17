@@ -8,7 +8,7 @@ npm run check
 npm run build
 ```
 
-Initial library capabilities: trusted actor contexts, role authorization, human authority for administrative/release operations, signed purpose/resource grants, expiry, policy revisions and revocation epochs. Identity federation, durable administration, compartment projections and live service acceptance remain planned in [registry/prs.json](registry/prs.json).
+Initial library capabilities: trusted actor contexts, role authorization, human authority for administrative/release operations, signed purpose/resource grants, expiry, policy revisions and revocation epochs. Every unit of the plan in [registry/prs.json](registry/prs.json) is implemented; the remaining live steps that need the owner's accounts are listed in [docs/OWNER_STEPS.md](docs/OWNER_STEPS.md).
 
 See [architecture](docs/ARCHITECTURE.md). Tests use fictional scopes and temporary keys. The Public Accountability Machine consumes this engine after its dependency contract is ready.
 
@@ -39,5 +39,9 @@ const decision = await identity.authorize(ctx, { capability: 'release:publish', 
 ```
 
 Other engines verify tokens with the public keys from `GET /v1/keys` (`keys` is the `IDENTITY_PUBLIC_KEYS` map).
-Tested locally against real PostgreSQL and local fake providers only; nothing has been verified against a live
-identity provider or a hosted deployment.
+Also: who-can-access and revocation-impact views, field-level redacted projections, shared rate limits, invitations,
+password reset through a host delivery port, organization-required two-factor sign-in and database row policies.
+
+Tested against real PostgreSQL and local fake providers. Live evidence so far: public deployment checks against the
+hosted deployment and an identity provider's public metadata (see `npm run verify:live`, `npm run verify:oidc-provider`
+and [docs/OWNER_STEPS.md](docs/OWNER_STEPS.md)); signed-in live checks need the owner's settings.

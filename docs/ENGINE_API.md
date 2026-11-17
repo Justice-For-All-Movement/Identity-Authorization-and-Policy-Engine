@@ -2,7 +2,7 @@
 
 Service layer of this repository (`src/engine/`). Kit: `src/service-kit.ts` version 1.0.1,
 sha256 `95475a907267ba1fdd54b557aabe5645c37add9788a5b2d0854d9accfd5d8ea5` (this repository is the kit's source of truth).
-Schema `e01_identity`. Capability prefix `identity`. Depends on no other engine.
+Engine manifest version 1.1.0. Schema `e01_identity`. Capability prefix `identity`. Depends on no other engine.
 
 Status words used below: **implemented** (code exists), **tested** (exercised by `tests/engine*.test.ts` on real
 PostgreSQL 16 and real local sockets), **not verified** (no live third party was contacted). Nothing here has had an
@@ -40,7 +40,9 @@ const handler = createHttpHandler({ name: 'E01', version: manifest.version, rout
 
 `ports` (`EnginePorts`, all optional): `intakeCredentials(connectionId, signal) => Promise<string>` (host secret store
 for the managed intake credential; absent ⇒ `verifyIntakeConnection` returns `unavailable`), `intakeTransport`
-(`CapabilityTransport`, default `fetch`), `oidcFetch` (default `fetch`). No kit port from another engine is needed.
+(`CapabilityTransport`, default `fetch`), `oidcFetch` (default `fetch`), `passwordResetDelivery(message, signal)` (the
+host's mailer for one-time reset tokens; absent ⇒ `requestPasswordReset` reports `unavailable`). No kit port from
+another engine is needed.
 
 ### Standalone server
 
@@ -56,6 +58,7 @@ for the managed intake credential; absent ⇒ `verifyIntakeConnection` returns `
 | `IDENTITY_KEY_ROTATION_DAYS` | no | Default 30: maintenance (every 5 minutes) rotates an older active signing key |
 | `IDENTITY_ALLOW_ORGANIZATION_CREATION=false`, `IDENTITY_OIDC_ALLOW_INSECURE_LOOPBACK=true` | no | as config |
 | `DATABASE_POOL_MAX` | no | Default 10 |
+| `IDENTITY_PASSWORD_RESET_WEBHOOK_URL`, `IDENTITY_PASSWORD_RESET_WEBHOOK_SECRET` | for password reset | Set together or not at all (start refuses otherwise). HTTPS (plain HTTP only to loopback), secret ≥ 32 characters. Each reset is a POST of the message JSON with `x-e01-timestamp` (Unix seconds) and `x-e01-signature: sha256=<hex HMAC-SHA256(secret, "<timestamp>.<body>")>`; a non-2xx answer discards the token |
 
 This engine does not read `IDENTITY_PUBLIC_KEYS` / `IDENTITY_JWKS_FILE`: it is where those values come from
 (`GET /v1/keys`, field `keys` = map kid → SPKI PEM, exactly the `IDENTITY_PUBLIC_KEYS` format). It uses no object
@@ -65,7 +68,7 @@ intake credential port (intake verification reports `unavailable`); an embedding
 ## 2. Model
 
 - **Organization** = tenant (`tenantId`). Carries `branding`, `defaultLocale`, `languages`, `jurisdiction`,
-  `policyConfig` (opaque JSON; recognised key: `agentGrantableActions: string[]`) and a monotonically increasing
+  `policyConfig` (opaque JSON; recognised keys, type-checked: `agentGrantableActions: string[]`, `requireMfa: boolean`) and a monotonically increasing
   **policy version**.
 - **Project**: `kind` is free text (`organizational`, `publishing`, `satirical`, `campaign`, …) with its own
   `identityProfile` JSON. `status` `active | archived`.
@@ -194,6 +197,65 @@ window, bounds not exhausted, resource match by equality or `urefMatches`). Reas
 `authorization_unavailable` (storage failure). A denied sensitive capability is audited (`access.denied`); a denied
 `*:disclose_identity` also emits `disclosure.denied`. `explain` evaluates any actor of the caller's organization
 without a token (`identity:read` unless asking about oneself).
+
+### Policy inspector, projections and rate limits
+
+```ts
+whoCanAccess(ctx, { capability; resource?; purpose?; projectId?; compartment?; limit? }): Promise<{ capability; purpose; projectId; resource; policyVersion; allowed: { actorId; kind; displayName; via }[]; deniedCount; evaluated; truncated }>
+revocationImpact(ctx, { actorId } | { role } | { grantId }): Promise<Json>    // read-only preview
+redact(ctx, { record; fields: Record<string, capability | null>; resource?; compartment?; actorId?; purpose?; unclassified?: 'withhold' | 'include' }): Promise<{ projection; withheld: { field; capability; reason }[]; decisions; policyVersion }>
+consumeRateLimit(ctx, { key; limit; windowSeconds; cost?; subject? }): Promise<{ allowed; key; subject; limit; used; remaining; resetAt }>
+rateLimitStatus(ctx, { key; subject? }): Promise<{ key; subject; used; windowStart } | null>
+```
+
+- `whoCanAccess` ("who can access this record") evaluates every actor with a current membership of the project with the
+  same procedure as `authorize`, without tokens (`identity:read`; another project needs `identity:admin`; at most 500).
+- `revocationImpact` previews, without changing anything, what a revocation would end: for an actor its memberships,
+  active grants, active sessions (administrators only) and whether `revokeActor(…, disable)` would disable the account;
+  for a role each holder's capabilities that no other current role supplies; for a grant whether the grantee keeps the
+  capability by role.
+- `redact` returns a field-level redacted projection of a record another engine supplies. Each classified field names
+  the exact capability needed to see it (`null` = visible); unclassified fields are withheld unless `unclassified:
+  'include'`. For the caller the decisions go through `authorize` (token-bound, so a withheld protected identity is an
+  audited `access.denied` / `disclosure.denied`); with `actorId` it is a disclosure preview for that actor
+  (`identity:read`, no token, not audited).
+- `consumeRateLimit` is an atomic fixed-window counter per (organization, subject, key) shared by every process: it
+  consumes `cost` (default 1) of `limit` per `windowSeconds` (1–86400) or answers `allowed: false` without consuming.
+  The subject defaults to the caller; metering another actor needs a service identity or `identity:admin`. Callers
+  must use the same parameters for a key.
+
+### Invitations and account recovery
+
+```ts
+createInvitation(ctx, { projectId?; roles; displayName?; expiresInSeconds? }): Promise<{ invitation: InvitationInfo; token }>   // identity:admin; token shown once
+listInvitations(ctx, { includeClosed? }): Promise<InvitationInfo[]>;  revokeInvitation(ctx, invitationId): Promise<InvitationInfo>
+acceptInvitation({ token, login?, password?, displayName?, refreshToken? }): Promise<{ actorId; tenantId; projectId; roles; session: SessionInfo | null }>   // public
+requestPasswordReset({ login }): Promise<{ accepted: true }>                                        // public
+completePasswordReset({ token, newPassword, code?, recoveryCode? }): Promise<{ ok: true }>          // public
+```
+
+- Invitations are single use, 5 minutes – 30 days (default 7 days), stored as a hash; this engine sends nothing (the host
+  delivers the token). Administrative roles need an owner, both when inviting and — on current state — when the
+  invitation is accepted: an inviter who has since lost `identity:admin` (or ownership, for administrative roles) no
+  longer backs the invitation. Accepting creates a local account, or with `refreshToken` adds the membership to the
+  signed-in person's existing account (one identity across organizations and projects).
+- Password reset answers `{ accepted: true }` for every well-formed login (no enumeration) and delivers in the
+  background through `passwordResetDelivery`, at most three times an hour per login. Tokens are single use and valid
+  30 minutes. When two-factor sign-in is enabled a current code or recovery code is also required (five attempts per 15
+  minutes). Completion ends every session of the account and clears the login lock.
+- `policyConfig.requireMfa: true`: access tokens for local password sessions of a person who has not enrolled carry no
+  capabilities and `restriction: 'mfa_enrollment_required'` — enough to enrol, nothing else. Federated (OIDC) sessions
+  rely on the provider's authentication policy.
+
+### Database row policies
+
+Migration `005_row_policies` enables row-level security on every table of the schema. The service connects as the
+table owner, which PostgreSQL exempts (no `FORCE`), so its behaviour is unchanged and isolation stays enforced in every
+query. Any other role that is neither superuser nor `BYPASSRLS` — reporting, support tooling, another engine, a leaked
+read credential — sees only the organization named by `set_config('e01.tenant_id', '<organization id>', true)` in its
+transaction, nothing when it is unset, and never a row of `credentials`, `sessions`, `mfa`, `signing_keys`, `deployment`,
+`auth_attempts`, `oidc_providers`, `oidc_states` or `password_resets`. Writes into another organization fail the policy
+check. Exported constants: `TENANT_SETTING`, `TENANT_TABLES`, `SECRET_TABLES`.
 
 ### Directory (`identity:read` to read, `identity:admin` to change)
 
@@ -337,6 +399,11 @@ Public (no bearer token): `GET /v1/keys` · `GET|POST /v1/bootstrap` · `POST /v
 Catalog API: `POST /v1/policy/evaluate` (`authorize`) · `POST /v1/capability-grants` · `POST /v1/grants/:id/revoke` ·
 `GET /v1/access/explain?actorId=&capability=&resource=&purpose=&projectId=&compartment=`.
 
+Inspector and lifecycle: `GET /v1/access/who?capability=&resource=&purpose=&projectId=&compartment=&limit=` ·
+`GET /v1/access/revocation-impact?actorId=|role=|grantId=` · `POST /v1/projections/redact` · `POST /v1/rate-limits/consume` ·
+`GET /v1/rate-limits?key=&subject=` · `GET|POST /v1/invitations` · `POST /v1/invitations/:id/revoke`; public:
+`POST /v1/invitations/accept` · `POST /v1/password-resets` · `POST /v1/password-resets/complete`.
+
 Others: `GET /v1/whoami` · `GET /v1/capability-grants` · `POST /v1/capability-grants/check` · `POST /v1/grants/:id/use` ·
 `GET|PATCH /v1/organization` · `POST /v1/organizations` · `GET /v1/my/organizations` · `GET|POST /v1/projects` ·
 `PATCH /v1/projects/:id` · `GET /v1/counts` · `GET /v1/export` · `GET|POST /v1/users` · `GET /v1/actors/:id` ·
@@ -399,26 +466,45 @@ real disposable PostgreSQL database per test:
   including seven tampered-response modes, state replay, cross-flow code, organization-bound sessions and mapping
   removal; intake adapter against a local HTTP server.
 - `tests/engine-http.test.ts` — the standalone server (`start`) end to end over real sockets.
+- `tests/engine-governance.test.ts` — who-can-access, revocation impact, redacted projections (including the audited
+  denial of a protected identity), concurrent rate limits, invitations (single use, inviter re-checked, existing
+  accounts), password reset through the port (no enumeration, expiry, sessions ended, second factor kept), required
+  two-factor enrolment, row policies under a restricted role, and the signed reset webhook.
+- `tests/engine-deployment.test.ts` — `scripts/live-verify.mjs` against a fresh standalone deployment (refused before
+  bootstrap and over plain HTTP; all public and signed-in checks pass after), plus the new routes and webhook delivery
+  over HTTP.
+- `scripts/package-smoke.mjs` (part of `npm run check`) — every package export is packed and loads from the build.
+
+### Live verification (opt-in)
+
+`npm run verify:live` (`IDENTITY_LIVE_BASE_URL`, optional `IDENTITY_LIVE_LOGIN` / `IDENTITY_LIVE_PASSWORD` /
+`IDENTITY_LIVE_TOTP_SECRET`) and `npm run verify:oidc-provider` (`IDENTITY_LIVE_OIDC_ISSUER`) check a running deployment
+and an identity provider; both skip without their settings. The `Live verification` workflow runs them on demand and
+weekly from repository variables and secrets; it never runs on pull requests. See [OWNER_STEPS.md](OWNER_STEPS.md).
 
 Earlier library suites (membership, revocations, resource policy, stored capability, federation mapping, intake
 adapter, kit) are unchanged and still run.
 
 ## 7. Not implemented, not verified, known limits
 
-- No live identity provider, intake deployment or hosted environment was used. No independent security review.
+- Live evidence is limited to: the public checks of `scripts/live-verify.mjs` (18 of 18) against the hosted
+  deployment that embeds this engine (an earlier pin, manifest 1.0.0) on 2026-11-17, and the provider check against a
+  public OIDC issuer's discovery metadata and keys (11 of 11). No signed-in check against a hosted deployment, no live
+  OIDC sign-in, no intake deployment and no real mail delivery were exercised. No independent security review.
 - Two-factor sign-in is TOTP (RFC 6238: SHA-1, 30 s, 6 digits, ±1 step) with ten hashed single-use recovery codes; the
   secret is sealed with the key-encryption key, each time step is accepted once (compare-and-set), and failures share
-  the login throttle. Not implemented: WebAuthn/passkeys, an organization policy that forces enrolment, password reset by
-  email, self-registration and invitation emails (this engine sends nothing).
+  the login throttle. Organizations can require enrolment (`requireMfa`); password reset and invitations are implemented
+  with host delivery (this engine sends no mail itself). Not implemented: WebAuthn/passkeys and open self-registration.
 - Refresh-token rotation is opt-in per client (`rotateSession` / `POST /v1/sessions/refresh`): the old token is retired, and
   presenting a retired token more than 10 s after its rotation ends the whole session (reuse detection; audited as
   `revoke_reason = refresh_token_reuse`). Rotation does not extend the absolute session lifetime. A client that never
   rotates keeps the earlier behaviour, where a stolen refresh token works until the session expires, idles out or is revoked.
 - Login lockout is per login name, so a third party can lock an account for the lock period (30 s doubling to 15 min).
-  There is no per-network-address throttle: the kit's HTTP layer does not expose the peer address.
+  There is no per-network-address throttle: the kit's HTTP layer does not expose the peer address (hosts can meter
+  addresses through `consumeRateLimit` in front of the engine).
 - Revocation reaches other engines only through `isRevoked` / `authorize` calls or token expiry (see §2).
-- Database row-level-security policies are not created; isolation is enforced in every query of this service layer.
-  The catalog's "redacted projections" and "rate limits" for other engines' data are not provided here.
+- Row-level security is an independent layer for roles other than the owning service (see §3); the service itself is
+  isolated by its queries. Redacted projections and rate limits are provided as services; consuming engines must call them.
 - The SSRF guard resolves names before the request; it does not pin the resolved address for the connection.
 - The earlier library modules (`membership.ts`, `revocations.ts`, `resource-policy.ts`, `stored-capability.ts`,
   `membership-http.ts`, `membership-session.ts`) remain exported and tested but are a separate persistence model

@@ -39,7 +39,13 @@ export type EnginePorts = Readonly<{
   intakeCredentials?: (connectionId: string, signal: AbortSignal) => Promise<string>;
   intakeTransport?: CapabilityTransport;
   oidcFetch?: typeof fetch;
+  /**
+   * Delivers a one-time password-reset token to the account holder (the host's mailer or messaging service). Called
+   * asynchronously, only for existing active accounts; without it `requestPasswordReset` reports `unavailable`.
+   */
+  passwordResetDelivery?: (message: PasswordResetMessage, signal: AbortSignal) => Promise<void>;
 }>;
+export type PasswordResetMessage = Readonly<{ type: 'password_reset'; actorId: string; login: string; token: string; expiresAt: string }>;
 export type EngineDeps = Readonly<{ sql: Sql; ports?: EnginePorts; config?: EngineConfig }>;
 
 export type DecisionStep = Readonly<{ rule: string; outcome: 'pass' | 'fail' | 'info'; detail: string }>;
@@ -49,7 +55,9 @@ export type AccessDecision = Readonly<{
   via: Readonly<{ kind: 'role'; roles: readonly string[] } | { kind: 'grant'; grantId: string; bounds: Json; expiresAt: string }> | null;
   trail: readonly DecisionStep[];
 }>;
-export type IssuedToken = Readonly<{ token: string; tokenId: string; expiresAt: string; actorId: string; tenantId: string; projectId: string; purpose: string; roles: readonly string[]; capabilities: readonly string[]; compartments: readonly string[]; policyVersion: string }>;
+export type IssuedToken = Readonly<{ token: string; tokenId: string; expiresAt: string; actorId: string; tenantId: string; projectId: string; purpose: string; roles: readonly string[]; capabilities: readonly string[]; compartments: readonly string[]; policyVersion: string;
+  /** Present when the organization requires two-factor sign-in and the holder has not enrolled: the token carries no capabilities. */
+  restriction?: 'mfa_enrollment_required' }>;
 export type SessionInfo = Readonly<{ sessionId: string; refreshToken: string; actorId: string; expiresAt: string; boundTenantId: string | null }>;
 
 export const ID = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;

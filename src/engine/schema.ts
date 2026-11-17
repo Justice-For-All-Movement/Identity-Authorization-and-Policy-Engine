@@ -4,6 +4,32 @@ import type { Migration } from '../service-kit.ts';
 export const SCHEMA = 'e01_identity';
 /** Project id used for organization-wide rows (memberships, grants). Never a real project id. */
 export const ORG_WIDE = '*';
+/** Session setting a restricted database role sets (per transaction) to see one organization's rows. */
+export const TENANT_SETTING = 'e01.tenant_id';
+
+/** Tables whose rows carry `tenant_id` and are visible, under row-level security, only for the scoped organization. */
+export const TENANT_TABLES = ['projects', 'memberships', 'roles', 'role_versions', 'purposes', 'compartments', 'compartment_members', 'grants',
+  'token_revocations', 'actor_revocations', 'actor_mappings', 'intake_connections', 'rate_limits', 'invitations', '_events', '_audit', '_idempotency', '_jobs'] as const;
+/** Tables holding credentials, sessions, keys or sealed secrets: no row is visible to any role subject to row security. */
+export const SECRET_TABLES = ['credentials', 'sessions', 'mfa', 'signing_keys', 'deployment', 'auth_attempts', 'oidc_providers', 'oidc_states', 'password_resets'] as const;
+/**
+ * Database row policies: an independent layer under the service's own query-level isolation. The service connects
+ * as the table owner, which PostgreSQL exempts from row security (no FORCE), so the engine's behaviour is unchanged.
+ * Every other non-superuser, non-BYPASSRLS role (reporting, support tooling, another engine, a leaked read credential)
+ * sees only rows of the organization named in `e01.tenant_id` for its transaction, nothing when it is unset, and
+ * never any credential, session, key or sealed-secret row.
+ */
+const tenantExpr = `current_setting('${TENANT_SETTING}', true)`;
+const ROW_POLICIES = [
+  `alter table {s}.organizations enable row level security;`,
+  `create policy e01_tenant_isolation on {s}.organizations using (id = ${tenantExpr}) with check (id = ${tenantExpr});`,
+  ...TENANT_TABLES.flatMap((t) => [`alter table {s}.${t} enable row level security;`, `create policy e01_tenant_isolation on {s}.${t} using (tenant_id = ${tenantExpr}) with check (tenant_id = ${tenantExpr});`]),
+  `alter table {s}.actors enable row level security;`,
+  `create policy e01_tenant_isolation on {s}.actors using (home_tenant_id = ${tenantExpr} or exists (select 1 from {s}.memberships m where m.actor_id = actors.id and m.tenant_id = ${tenantExpr})) with check (home_tenant_id = ${tenantExpr});`,
+  `alter table {s}.grant_uses enable row level security;`,
+  `create policy e01_tenant_isolation on {s}.grant_uses using (exists (select 1 from {s}.grants g where g.id = grant_uses.grant_id and g.tenant_id = ${tenantExpr}));`,
+  ...SECRET_TABLES.map((t) => `alter table {s}.${t} enable row level security;`),
+].join('\n');
 
 export const migrations: readonly Migration[] = [{ id: '001_identity_core', sql: `
 create table {s}.deployment (key text primary key, value jsonb not null);
@@ -110,7 +136,22 @@ create table if not exists {s}.mfa (
   actor_id text primary key, secret_sealed text not null, confirmed_at timestamptz, last_step bigint not null default 0,
   recovery_hashes text[] not null default '{}', created_at timestamptz not null, updated_at timestamptz not null
 );
-` }];
+` }, { id: '004_account_lifecycle', sql: `
+create table if not exists {s}.rate_limits (
+  tenant_id text not null, subject text not null, key text not null, window_start timestamptz not null, used int not null,
+  primary key (tenant_id, subject, key)
+);
+create table if not exists {s}.invitations (
+  id text primary key, tenant_id text not null, project_id text not null, roles text[] not null, token_hash text not null unique,
+  display_name text, purpose text not null, issuer_project_id text not null, expires_at timestamptz not null, created_at timestamptz not null, created_by text not null,
+  accepted_at timestamptz, accepted_by text, revoked_at timestamptz, revoked_by text
+);
+create index if not exists invitations_tenant on {s}.invitations (tenant_id, created_at);
+create table if not exists {s}.password_resets (
+  token_hash text primary key, actor_id text not null, expires_at timestamptz not null, created_at timestamptz not null, used_at timestamptz
+);
+create index if not exists password_resets_actor on {s}.password_resets (actor_id);
+` }, { id: '005_row_policies', sql: ROW_POLICIES }];
 
 export const ENGINES = ['orchestration', 'identity', 'intake', 'correspondence', 'discovery', 'evidence', 'processing', 'knowledge', 'investigation', 'editorial', 'production', 'consent', 'release', 'resources', 'workspace'] as const;
 const all = (suffix: string): string[] => ENGINES.map((e) => `${e}:${suffix}`);
