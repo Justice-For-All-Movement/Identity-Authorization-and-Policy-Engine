@@ -651,6 +651,38 @@ export function createEngine(deps: EngineDeps) {
     if (updated.length === 0) throw denied('Session is invalid or has ended');
     return { sessionId: s.id, refreshToken: `${s.id}.${secret}`, actorId: s.actor_id, expiresAt: iso(s.expires_at), boundTenantId: s.bound_tenant_id ?? null };
   }
+  // ── signing in another device (QR code) ──
+  const DEVICE_LINK_SECONDS = 120;
+  /**
+   * A signed-in person creates a one-time link that signs another device (their phone) in as them: a new, separate
+   * session. The link is shown as a QR code, works once, and expires after two minutes. Only its hash is stored.
+   * The new session counts as having passed the second factor, because the person already passed it on this device.
+   */
+  async function createDeviceLink(refreshToken: string): Promise<{ token: string; expiresAt: string }> {
+    const s = await loadSession(refreshToken);
+    const id = randomUUID(), secret = randomToken(32), at = clock();
+    const expiresAt = new Date(at.getTime() + DEVICE_LINK_SECONDS * 1000).toISOString();
+    await sql.query(`insert into ${S}.device_links (id, actor_id, secret_hash, created_at, expires_at, created_from_session) values ($1,$2,$3,$4,$5,$6)`, [id, s.actor_id, sha256(secret), at.toISOString(), expiresAt, s.id]);
+    return { token: `${id}.${secret}`, expiresAt };
+  }
+  /** Redeems a device link once; returns a new session for the person who created it. */
+  async function redeemDeviceLink(token: string): Promise<SessionInfo> {
+    if (typeof token !== 'string' || token.length > 200 || !token.includes('.')) throw denied('This sign-in code is not valid');
+    const [id, secret] = [token.slice(0, token.indexOf('.')), token.slice(token.indexOf('.') + 1)];
+    let actorId = '';
+    await throttle(`device-link:${id}`, async () => {
+      const at = clock().toISOString();
+      // Single use: the row is claimed atomically, so two devices scanning the same code cannot both sign in.
+      const rows = await sql.query<R>(`update ${S}.device_links d set used_at=$3 from ${S}.actors a where d.id=$1 and d.secret_hash=$2 and d.used_at is null and d.expires_at > $3 and a.id=d.actor_id and a.status='active'
+        and exists (select 1 from ${S}.sessions s where s.id=d.created_from_session and s.revoked_at is null) returning d.actor_id`, [id, sha256(secret), at]);
+      if (rows[0] === undefined) return false;
+      actorId = rows[0].actor_id as string;
+      return true;
+    });
+    const session = await createSession(sql, actorId, 'device_link', null);
+    await sql.query(`update ${S}.device_links set session_id=$2 where id=$1`, [id, session.sessionId]);
+    return session;
+  }
   async function logout(refreshToken: string): Promise<void> {
     const s = await loadSession(refreshToken);
     await sql.query(`update ${S}.sessions set revoked_at=$2, revoked_by=$3, revoke_reason='logout' where id=$1 and revoked_at is null`, [s.id, clock().toISOString(), s.actor_id]);
@@ -1042,7 +1074,7 @@ export function createEngine(deps: EngineDeps) {
   const engine = {
     manifest,
     // host / unauthenticated entry points
-    bootstrapFirstAdministrator, isBootstrapped, login, logout, rotateSession, beginMfaEnrollment, confirmMfaEnrollment, mfaStatus, disableMfa, resetMfa, sessionDirectory, issueAccessToken, authenticateService,
+    bootstrapFirstAdministrator, isBootstrapped, login, logout, rotateSession, createDeviceLink, redeemDeviceLink, beginMfaEnrollment, confirmMfaEnrollment, mfaStatus, disableMfa, resetMfa, sessionDirectory, issueAccessToken, authenticateService,
     publicKeys: k.loadPublicKeys, jwks, verifier: k.verifier as () => TokenVerifier, isRevoked: k.isRevoked as (claims: TokenClaims | IdentityClaims) => Promise<boolean>,
     host: {
       /** Trusted in-process callers only (never exposed over HTTP). */

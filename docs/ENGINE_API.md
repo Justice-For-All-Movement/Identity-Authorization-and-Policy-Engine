@@ -153,6 +153,8 @@ sessionDirectory(refreshToken: string): Promise<{ actorId; sessionId; expiresAt;
 issueAccessToken(input: { refreshToken; tenantId; projectId; purpose; capabilities?: string[]; ttlSeconds? }): Promise<IssuedToken>
 logout(refreshToken: string): Promise<void>
 rotateSession(refreshToken: string): Promise<SessionInfo>   // new refresh token for the same session; the presented one is retired
+createDeviceLink(refreshToken): Promise<{ token, expiresAt }>   // one-time link (shown as a QR code) that signs another device in; 2 minutes
+redeemDeviceLink(token): Promise<SessionInfo>                   // single use; a new, separate session; void once the creating session ends
 login(input: { login, password, code?, recoveryCode? }): Promise<SessionInfo>   // with two-factor on and no code: DomainError invalid_mfa_required (400)
 mfaStatus(ctx): Promise<{ enabled, pending, recoveryCodesLeft }>            // the caller's own account (human)
 beginMfaEnrollment(ctx): Promise<{ secret, otpauthUri }>                     // secret shown once; not active until confirmed
@@ -393,7 +395,7 @@ Standard: `GET /healthz`, `GET /v1/manifest` (public), `GET /v1/inspect?ref=`, `
 `GET /v1/events`, `POST /v1/upstream-changes`.
 
 Public (no bearer token): `GET /v1/keys` · `GET|POST /v1/bootstrap` · `POST /v1/sessions` (login) ·
-`POST /v1/sessions/directory` · `POST /v1/sessions/refresh` · `POST /v1/sessions/logout` · `GET /v1/mfa` · `POST /v1/mfa/enroll` · `POST /v1/mfa/confirm` · `POST /v1/mfa/disable` · `POST /v1/actors/:id/mfa/reset` · `POST /v1/tokens` · `POST /v1/tokens/service` ·
+`POST /v1/sessions/directory` · `POST /v1/sessions/device-links` · `POST /v1/sessions/device-links/redeem` · `POST /v1/sessions/refresh` · `POST /v1/sessions/logout` · `GET /v1/mfa` · `POST /v1/mfa/enroll` · `POST /v1/mfa/confirm` · `POST /v1/mfa/disable` · `POST /v1/actors/:id/mfa/reset` · `POST /v1/tokens` · `POST /v1/tokens/service` ·
 `POST /v1/oidc/start` · `POST /v1/oidc/callback`.
 
 Catalog API: `POST /v1/policy/evaluate` (`authorize`) · `POST /v1/capability-grants` · `POST /v1/grants/:id/revoke` ·

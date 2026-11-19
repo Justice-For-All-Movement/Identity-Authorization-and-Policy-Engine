@@ -151,7 +151,14 @@ create table if not exists {s}.password_resets (
   token_hash text primary key, actor_id text not null, expires_at timestamptz not null, created_at timestamptz not null, used_at timestamptz
 );
 create index if not exists password_resets_actor on {s}.password_resets (actor_id);
-` }, { id: '005_row_policies', sql: ROW_POLICIES }];
+` }, { id: '005_row_policies', sql: ROW_POLICIES }, { id: '006_device_links', sql: `
+create table if not exists {s}.device_links (
+  id text primary key, actor_id text not null, secret_hash text not null, created_at timestamptz not null, expires_at timestamptz not null,
+  used_at timestamptz, session_id text, created_from_session text not null
+);
+create index if not exists device_links_actor on {s}.device_links (actor_id, created_at);
+alter table {s}.device_links enable row level security;
+` }];
 
 export const ENGINES = ['orchestration', 'identity', 'intake', 'correspondence', 'discovery', 'evidence', 'processing', 'knowledge', 'investigation', 'editorial', 'production', 'consent', 'release', 'resources', 'workspace'] as const;
 const all = (suffix: string): string[] => ENGINES.map((e) => `${e}:${suffix}`);
